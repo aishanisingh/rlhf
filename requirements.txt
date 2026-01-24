@@ -1,1 +1,8 @@
+# cloud deployment (streamlit cloud)
 streamlit>=1.28.0
+
+# local development with full ml features (uncomment below)
+# torch>=2.0.0
+# transformers>=4.35.0
+# openai>=1.0.0
+# numpy>=1.24.0

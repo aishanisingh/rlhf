@@ -45,6 +45,25 @@ B) Chromosome 6
 C) Chromosome 9
 D) Chromosome X""",
         "answer": "C"
+    },
+    "sample4": {
+        "question": """A 25-year-old male presents with high-grade fever and hypotension. Laboratory results show hemoglobin 5 g/dL, total leukocyte count 9000/mm3, and a differential count of 2% polymorphs, 96% lymphocytes, and 2% eosinophils. Which of the following treatment options should be avoided in this clinical scenario?
+
+A) Intravenous fluid resuscitation
+B) Packed red blood cell transfusion
+C) Oral ciprofloxacin
+D) Intravenous broad-spectrum antibiotics""",
+        "answer": "C"
+    },
+    "sample5": {
+        "question": """A 32-year-old man presents with a severe headache in the left forehead and eye that wakes him from sleep. He has a history of a recent sinus infection and type 1 diabetes. Imaging reveals thrombosis of a sinus located above the sella turcica. Which of the following findings would most likely also be seen in this patient?
+
+A) Anosmia
+B) Mandibular pain
+C) Ophthalmoplegia
+D) Vertigo
+E) Vision loss""",
+        "answer": "C"
     }
 }
 
@@ -172,6 +191,102 @@ The answer is C."""
         {
             "id": "trace_2",
             "text": """GAA repeats cause Friedreich's ataxia. The gene for this is on chromosome 9.
+
+The answer is C."""
+        }
+    ],
+    "sample4": [
+        {
+            "id": "trace_0",
+            "text": """This is a critically ill patient with fever, hypotension, and severely abnormal labs. Let me analyze systematically.
+
+Key findings:
+- Severe anemia: Hb 5 g/dL (critical)
+- Abnormal differential: 2% neutrophils (profound neutropenia), 96% lymphocytes
+- Signs of sepsis/shock: fever, hypotension
+
+The differential with only 2% polymorphs indicates severe neutropenia. Combined with fever and hypotension, this is febrile neutropenia with septic shock - a medical emergency.
+
+Management priorities:
+- IV fluid resuscitation: Essential for shock - should be given
+- Packed RBC transfusion: Critical for Hb of 5 - should be given
+- IV broad-spectrum antibiotics: Standard of care for febrile neutropenia - should be given
+
+What should be AVOIDED?
+- Oral ciprofloxacin: In septic shock, GI absorption is unreliable due to poor perfusion. IV antibiotics are mandatory. Oral route is inadequate for this acuity.
+
+The answer is C."""
+        },
+        {
+            "id": "trace_1",
+            "text": """This patient has febrile neutropenia (2% polymorphs) with signs of septic shock.
+
+The treatment needs to be aggressive:
+- Fluids for hypotension - yes
+- Blood transfusion for severe anemia - yes
+- Antibiotics - yes, but must be IV
+
+Oral ciprofloxacin would be inappropriate because:
+1. The patient is in shock with unreliable GI absorption
+2. Febrile neutropenia requires IV antibiotics
+3. Oral medications are too slow-acting for this emergency
+
+The answer is C."""
+        },
+        {
+            "id": "trace_2",
+            "text": """The patient has low neutrophils and signs of infection with shock.
+
+You can't give oral antibiotics to someone in septic shock. They need IV antibiotics.
+
+The answer is C."""
+        }
+    ],
+    "sample5": [
+        {
+            "id": "trace_0",
+            "text": """This case requires careful neuroanatomical reasoning. Let me analyze the key features.
+
+Clinical presentation:
+- Severe headache in left forehead and eye, waking from sleep
+- History of recent sinus infection
+- Type 1 diabetes (increases infection risk)
+- Imaging shows sinus thrombosis ABOVE the sella turcica
+
+The location "above the sella turcica" is critical - this describes the cavernous sinus. Cavernous sinus thrombosis (CST) is a serious complication of facial/sinus infections.
+
+Structures within the cavernous sinus:
+- CN III (oculomotor)
+- CN IV (trochlear)
+- CN VI (abducens)
+- CN V1 and V2 (trigeminal branches)
+- Internal carotid artery
+
+When these cranial nerves are affected by inflammation/thrombosis, the result is ophthalmoplegia - inability to move the eye properly.
+
+Let me exclude other options:
+- Anosmia: CN I is not in cavernous sinus
+- Mandibular pain: V3 is not in cavernous sinus
+- Vertigo: CN VIII is not in cavernous sinus
+- Vision loss: Optic nerve is not in cavernous sinus
+
+The answer is C."""
+        },
+        {
+            "id": "trace_1",
+            "text": """The imaging shows thrombosis above the sella turcica - this is the cavernous sinus.
+
+The cavernous sinus contains cranial nerves III, IV, VI (eye movement) and branches of V.
+
+With cavernous sinus thrombosis, these nerves get compressed, causing ophthalmoplegia (paralysis of eye movements).
+
+The olfactory nerve and vestibular system are not involved. The optic nerve runs separately.
+
+The answer is C."""
+        },
+        {
+            "id": "trace_2",
+            "text": """Thrombosis above sella turcica means cavernous sinus problem. Eye movement nerves are in the cavernous sinus.
 
 The answer is C."""
         }
