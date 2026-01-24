@@ -1,20 +1,66 @@
 """
-Streamlit UI for TriFetch Online RLHF Workbench.
-Lightweight version for cloud deployment.
+RLHF Workbench - Medical AI Post-Training Interface
 """
 import streamlit as st
-import json
 import math
 from typing import Dict, List
-from dataclasses import dataclass
 from enum import Enum
 
 # Page configuration
 st.set_page_config(
     page_title="RLHF Workbench",
     page_icon="🏥",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
+
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 0;
+    }
+    .sub-header {
+        font-size: 1.1rem;
+        color: #666;
+        margin-top: 0;
+    }
+    .info-box {
+        background-color: #f0f7ff;
+        border-left: 4px solid #1f77b4;
+        padding: 1rem;
+        border-radius: 0 8px 8px 0;
+        margin: 1rem 0;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+    }
+    .trace-box {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        background: #fafafa;
+    }
+    .step-number {
+        background: #1f77b4;
+        color: white;
+        border-radius: 50%;
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        margin-right: 8px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ============== Embedded Demo Data ==============
 
@@ -26,7 +72,8 @@ A) Mitral Valve Prolapse
 B) Patent Foramen Ovale
 C) Hypertrophic Cardiomyopathy
 D) Ventricular Septal Defect""",
-        "answer": "B"
+        "answer": "B",
+        "topic": "Cardiology - Paradoxical Embolism"
     },
     "sample2": {
         "question": """A 33-year-old woman is brought to the emergency department 15 minutes after being stabbed in the chest with a screwdriver. Her pulse is 110/min, respirations 22/min, and blood pressure 90/65 mm Hg. There is a 5-cm deep stab wound at the upper border of the 8th rib in the left midaxillary line. Which anatomical structure is most likely to be injured?
@@ -35,7 +82,8 @@ A) Left atrium of the heart
 B) Lower lobe of the left lung
 C) Spleen
 D) Left lobe of the liver""",
-        "answer": "B"
+        "answer": "B",
+        "topic": "Anatomy - Thoracic Trauma"
     },
     "sample3": {
         "question": """A patient presents with progressive gait disturbances, tremors, and speech difficulties. Genetic testing confirms the presence of GAA trinucleotide repeat expansions. Which chromosome is most commonly associated with the mutated gene in this condition?
@@ -44,7 +92,8 @@ A) Chromosome 4
 B) Chromosome 6
 C) Chromosome 9
 D) Chromosome X""",
-        "answer": "C"
+        "answer": "C",
+        "topic": "Genetics - Friedreich's Ataxia"
     },
     "sample4": {
         "question": """A 25-year-old male presents with high-grade fever and hypotension. Laboratory results show hemoglobin 5 g/dL, total leukocyte count 9000/mm3, and a differential count of 2% polymorphs, 96% lymphocytes, and 2% eosinophils. Which of the following treatment options should be avoided in this clinical scenario?
@@ -53,7 +102,8 @@ A) Intravenous fluid resuscitation
 B) Packed red blood cell transfusion
 C) Oral ciprofloxacin
 D) Intravenous broad-spectrum antibiotics""",
-        "answer": "C"
+        "answer": "C",
+        "topic": "Hematology - Febrile Neutropenia"
     },
     "sample5": {
         "question": """A 32-year-old man presents with a severe headache in the left forehead and eye that wakes him from sleep. He has a history of a recent sinus infection and type 1 diabetes. Imaging reveals thrombosis of a sinus located above the sella turcica. Which of the following findings would most likely also be seen in this patient?
@@ -63,7 +113,8 @@ B) Mandibular pain
 C) Ophthalmoplegia
 D) Vertigo
 E) Vision loss""",
-        "answer": "C"
+        "answer": "C",
+        "topic": "Neurology - Cavernous Sinus Thrombosis"
     }
 }
 
@@ -296,12 +347,6 @@ The answer is C."""
 
 # ============== Optimization Logic ==============
 
-class Rank(Enum):
-    BEST = "best"
-    MIDDLE = "middle"
-    WORST = "worst"
-
-
 def stable_log_sigmoid(x: float) -> float:
     """Numerically stable log(sigmoid(x))."""
     if x >= 0:
@@ -311,31 +356,21 @@ def stable_log_sigmoid(x: float) -> float:
 
 
 def compute_dpo_signals(chosen_text: str, rejected_text: str, beta: float = 0.1):
-    """Compute DPO optimization signals (simulated log-probs for demo)."""
-    # Simulate log-probs based on text length and complexity
-    # In production, these would come from actual model inference
-
+    """Compute DPO optimization signals."""
     def simulate_logprob(text: str, is_policy: bool) -> float:
         base = -2.0 * len(text.split())
-        # Policy model slightly prefers longer, more detailed responses
         if is_policy:
             base += len(text.split()) * 0.1
         return base
 
-    # Policy and reference log-probs
     chosen_policy_lp = simulate_logprob(chosen_text, True)
     chosen_ref_lp = simulate_logprob(chosen_text, False)
     rejected_policy_lp = simulate_logprob(rejected_text, True)
     rejected_ref_lp = simulate_logprob(rejected_text, False)
 
-    # Implicit rewards
     chosen_reward = chosen_policy_lp - chosen_ref_lp
     rejected_reward = rejected_policy_lp - rejected_ref_lp
-
-    # Margin (standard DPO: chosen - rejected)
     margin = chosen_reward - rejected_reward
-
-    # DPO loss
     loss = -stable_log_sigmoid(beta * margin)
 
     return {
@@ -361,13 +396,11 @@ def compute_grpo_signals(traces: List[Dict], rankings: Dict[str, str]):
         rank = rankings.get(tid)
         rewards[tid] = rank_rewards.get(rank, 0.0)
 
-    # Group statistics
     reward_vals = list(rewards.values())
     mean_reward = sum(reward_vals) / len(reward_vals)
     variance = sum((r - mean_reward) ** 2 for r in reward_vals) / len(reward_vals)
     std_reward = math.sqrt(variance)
 
-    # Advantages
     advantages = {}
     for tid, reward in rewards.items():
         advantages[tid] = (reward - mean_reward) / (std_reward + 1e-8)
@@ -383,127 +416,208 @@ def compute_grpo_signals(traces: List[Dict], rankings: Dict[str, str]):
 # ============== Main App ==============
 
 def main():
-    st.title("🏥 RLHF Workbench")
-    st.markdown("""
-    **Medical AI Post-Training Control Room**
+    # Header
+    st.markdown('<p class="main-header">🏥 RLHF Workbench</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Reinforcement Learning from Human Feedback for Medical AI</p>', unsafe_allow_html=True)
 
-    Rank AI reasoning traces and compute optimization signals using DPO and GRPO.
-    """)
+    # Introduction
+    with st.expander("📖 What is this tool?", expanded=True):
+        st.markdown("""
+        ### Purpose
+        This workbench demonstrates **Reinforcement Learning from Human Feedback (RLHF)** -
+        a technique used to improve AI models based on human preferences.
+
+        ### How it works
+        1. **AI generates multiple reasoning traces** for medical questions
+        2. **You (the clinician) rank them** by quality: Best, Middle, Worst
+        3. **The system computes optimization signals** that would steer the AI to produce better responses
+
+        ### Why this matters
+        In healthcare AI, we need models that don't just get the right answer, but also:
+        - Explain their reasoning clearly
+        - Consider differential diagnoses
+        - Flag when to escalate to specialists
+
+        RLHF helps train models to match expert preferences, not just correctness.
+        """)
+
+    st.divider()
 
     # Sidebar
     with st.sidebar:
-        st.header("Configuration")
+        st.header("⚙️ Settings")
 
-        st.subheader("DPO Settings")
-        beta = st.slider("Beta (KL penalty)", 0.01, 1.0, 0.1, 0.01)
+        st.subheader("DPO Parameters")
+        beta = st.slider(
+            "Beta (β)",
+            0.01, 1.0, 0.1, 0.01,
+            help="Controls how much the model can deviate from the reference. Higher = more conservative."
+        )
 
-        st.subheader("GRPO Settings")
-        st.caption("Rewards: Best=1.0, Middle=0.5, Worst=0.0")
+        st.divider()
 
-    # Sample selector
-    st.subheader("Select Medical Case")
-    selected_id = st.selectbox(
-        "Choose a sample:",
-        list(SAMPLES.keys()),
-        format_func=lambda x: f"{x} (Answer: {SAMPLES[x]['answer']})"
-    )
+        st.subheader("GRPO Rewards")
+        st.markdown("""
+        | Rank | Reward |
+        |------|--------|
+        | Best | 1.0 |
+        | Middle | 0.5 |
+        | Worst | 0.0 |
+        """)
+
+        st.divider()
+
+        with st.expander("ℹ️ About the Methods"):
+            st.markdown("""
+            **DPO (Direct Preference Optimization)**
+            - Compares Best vs Worst traces
+            - Computes implicit rewards from log-probabilities
+            - Loss encourages model to prefer better traces
+
+            **GRPO (Group Relative Policy Optimization)**
+            - Uses all 3 traces together
+            - Computes advantages relative to group mean
+            - Normalizes by group standard deviation
+            """)
+
+    # Main content
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        st.subheader("📋 Select Case")
+        selected_id = st.selectbox(
+            "Medical case:",
+            list(SAMPLES.keys()),
+            format_func=lambda x: f"{x.replace('sample', 'Case ')}: {SAMPLES[x]['topic']}"
+        )
 
     sample = SAMPLES[selected_id]
     traces = TRACES[selected_id]
 
-    # Display question
-    st.subheader("Medical Question")
-    with st.expander("View Question", expanded=True):
+    # Question display
+    st.subheader("🩺 Clinical Scenario")
+
+    with st.container(border=True):
         st.markdown(sample["question"])
-        st.success(f"**Ground Truth: {sample['answer']}**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.success(f"**Correct Answer: {sample['answer']}**")
+        with col2:
+            st.info(f"**Topic: {sample['topic']}**")
 
-    # Rank traces
-    st.subheader("Rank the Reasoning Traces")
-    st.markdown("Assign **Best**, **Middle**, and **Worst** to each trace.")
+    # Instructions
+    st.subheader("📝 Your Task: Rank the AI Responses")
 
-    # Session state for rankings
+    st.markdown("""
+    <div class="info-box">
+    <strong>Instructions:</strong> Below are 3 AI-generated reasoning traces that all arrive at the correct answer.
+    Your job is to evaluate the <em>quality of reasoning</em>, not just correctness.
+    <br><br>
+    <strong>Consider:</strong> Is the explanation thorough? Does it show good clinical reasoning?
+    Would you trust this explanation from a colleague?
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Session state
     if "rankings" not in st.session_state:
         st.session_state.rankings = {}
     if selected_id not in st.session_state.rankings:
         st.session_state.rankings[selected_id] = {}
 
+    # Trace display
     cols = st.columns(3)
+
     for i, (col, trace) in enumerate(zip(cols, traces)):
         with col:
-            st.markdown(f"**Trace {i+1}**")
-            with st.container(border=True, height=300):
-                st.markdown(trace["text"][:800] + "..." if len(trace["text"]) > 800 else trace["text"])
+            quality_labels = ["Detailed", "Moderate", "Brief"]
+            word_count = len(trace["text"].split())
+
+            st.markdown(f"### Response {i+1}")
+            st.caption(f"{word_count} words • {quality_labels[i]} explanation")
+
+            with st.container(border=True, height=350):
+                st.markdown(trace["text"])
 
             rank = st.selectbox(
-                f"Rank",
-                ["(Select)", "Best", "Middle", "Worst"],
-                key=f"rank_{selected_id}_{trace['id']}"
+                f"Your ranking:",
+                ["— Select —", "🥇 Best", "🥈 Middle", "🥉 Worst"],
+                key=f"rank_{selected_id}_{trace['id']}",
+                label_visibility="collapsed"
             )
-            if rank != "(Select)":
-                st.session_state.rankings[selected_id][trace["id"]] = rank
 
-    # Validate rankings
+            if rank != "— Select —":
+                clean_rank = rank.split(" ")[1]  # Remove emoji
+                st.session_state.rankings[selected_id][trace["id"]] = clean_rank
+
+    # Validation
     rankings = st.session_state.rankings[selected_id]
     assigned = [r for r in rankings.values() if r]
     valid = len(assigned) == 3 and set(assigned) == {"Best", "Middle", "Worst"}
 
     if assigned and not valid:
-        st.warning("Assign exactly one trace to each rank: Best, Middle, Worst")
+        st.warning("⚠️ Please assign exactly one response to each rank (Best, Middle, Worst)")
 
-    # Update button
+    # Compute button
     st.divider()
+
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         clicked = st.button(
-            "🔄 Compute Optimization Signals",
+            "🔬 Compute Optimization Signals",
             type="primary",
             disabled=not valid,
             use_container_width=True
         )
 
     if clicked and valid:
-        # Find chosen/rejected
         chosen_trace = next(t for t in traces if rankings[t["id"]] == "Best")
         rejected_trace = next(t for t in traces if rankings[t["id"]] == "Worst")
 
-        # Compute signals
         dpo = compute_dpo_signals(chosen_trace["text"], rejected_trace["text"], beta)
         grpo = compute_grpo_signals(traces, rankings)
 
-        st.success("Optimization signals computed!")
+        st.success("✅ Optimization signals computed successfully!")
 
-        # Display results
-        tab1, tab2 = st.tabs(["DPO Results", "GRPO Results"])
+        st.subheader("📊 Results")
+
+        tab1, tab2, tab3 = st.tabs(["DPO Analysis", "GRPO Analysis", "Interpretation"])
 
         with tab1:
-            st.subheader("Direct Preference Optimization")
+            st.markdown("### Direct Preference Optimization (DPO)")
+            st.markdown("*Compares your Best vs Worst selections*")
 
-            c1, c2 = st.columns(2)
-            c1.metric("DPO Loss", f"{dpo['loss']:.4f}")
-            c2.metric("Margin (chosen - rejected)", f"{dpo['margin']:.4f}")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("DPO Loss", f"{dpo['loss']:.4f}", help="Lower = model already prefers Best")
+            col2.metric("Preference Margin", f"{dpo['margin']:.4f}", help="Positive = correct preference")
+            col3.metric("Beta", f"{beta}", help="KL penalty coefficient")
 
-            st.markdown("---")
-            st.markdown("**Chosen (Best) Trace**")
-            st.markdown(f"- Policy log-prob: `{dpo['chosen_policy_lp']:.2f}`")
-            st.markdown(f"- Reference log-prob: `{dpo['chosen_ref_lp']:.2f}`")
-            st.markdown(f"- **Implicit Reward**: `{dpo['chosen_reward']:.4f}`")
+            st.divider()
 
-            st.markdown("**Rejected (Worst) Trace**")
-            st.markdown(f"- Policy log-prob: `{dpo['rejected_policy_lp']:.2f}`")
-            st.markdown(f"- Reference log-prob: `{dpo['rejected_ref_lp']:.2f}`")
-            st.markdown(f"- **Implicit Reward**: `{dpo['rejected_reward']:.4f}`")
+            col1, col2 = st.columns(2)
 
-            st.info("**Interpretation**: Positive margin = model correctly prefers chosen trace (low loss).")
+            with col1:
+                st.markdown("**🥇 Best Response (Chosen)**")
+                st.metric("Implicit Reward", f"{dpo['chosen_reward']:.4f}")
+                st.caption(f"Policy log-prob: {dpo['chosen_policy_lp']:.2f}")
+                st.caption(f"Reference log-prob: {dpo['chosen_ref_lp']:.2f}")
+
+            with col2:
+                st.markdown("**🥉 Worst Response (Rejected)**")
+                st.metric("Implicit Reward", f"{dpo['rejected_reward']:.4f}")
+                st.caption(f"Policy log-prob: {dpo['rejected_policy_lp']:.2f}")
+                st.caption(f"Reference log-prob: {dpo['rejected_ref_lp']:.2f}")
 
         with tab2:
-            st.subheader("Group Relative Policy Optimization")
+            st.markdown("### Group Relative Policy Optimization (GRPO)")
+            st.markdown("*Analyzes all 3 responses together*")
 
-            c1, c2 = st.columns(2)
-            c1.metric("Mean Reward", f"{grpo['mean_reward']:.4f}")
-            c2.metric("Std Reward", f"{grpo['std_reward']:.4f}")
+            col1, col2 = st.columns(2)
+            col1.metric("Group Mean Reward", f"{grpo['mean_reward']:.4f}")
+            col2.metric("Group Std Deviation", f"{grpo['std_reward']:.4f}")
 
-            st.markdown("---")
-            st.markdown("**Per-Trace Results**")
+            st.divider()
+
+            st.markdown("**Per-Response Advantages**")
 
             for trace in traces:
                 tid = trace["id"]
@@ -511,11 +625,32 @@ def main():
                 reward = grpo["rewards"][tid]
                 adv = grpo["advantages"][tid]
 
-                with st.container(border=True):
-                    st.markdown(f"**{tid}** ({rank})")
-                    c1, c2 = st.columns(2)
-                    c1.metric("Reward", f"{reward:.2f}")
-                    c2.metric("Advantage", f"{adv:.4f}")
+                emoji = "🥇" if rank == "Best" else "🥈" if rank == "Middle" else "🥉"
+
+                col1, col2, col3 = st.columns([2, 1, 1])
+                col1.markdown(f"{emoji} **{rank}** (Response {traces.index(trace) + 1})")
+                col2.metric("Reward", f"{reward:.2f}", label_visibility="collapsed")
+                col3.metric("Advantage", f"{adv:+.4f}", label_visibility="collapsed")
+
+        with tab3:
+            st.markdown("### What do these numbers mean?")
+
+            st.markdown("""
+            #### DPO Interpretation
+            - **Positive margin** → The model already tends to prefer your "Best" choice ✅
+            - **Negative margin** → The model prefers your "Worst" choice (needs training) ⚠️
+            - **Lower loss** → Less correction needed
+
+            #### GRPO Interpretation
+            - **Positive advantage** → Response is above average for this group
+            - **Zero advantage** → Response is exactly average
+            - **Negative advantage** → Response is below average
+
+            #### In Practice
+            These signals would be used to update the model's weights via gradient descent,
+            making it more likely to generate responses similar to your "Best" choice
+            and less likely to generate responses like your "Worst" choice.
+            """)
 
 
 if __name__ == "__main__":
