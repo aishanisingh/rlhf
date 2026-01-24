@@ -580,7 +580,7 @@ def main():
 
         st.subheader("📊 Results")
 
-        tab1, tab2, tab3 = st.tabs(["DPO Analysis", "GRPO Analysis", "Interpretation"])
+        tab1, tab2 = st.tabs(["DPO Analysis", "GRPO Analysis"])
 
         with tab1:
             st.markdown("### Direct Preference Optimization (DPO)")
@@ -607,6 +607,18 @@ def main():
                 st.caption(f"Policy log-prob: {dpo['rejected_policy_lp']:.2f}")
                 st.caption(f"Reference log-prob: {dpo['rejected_ref_lp']:.2f}")
 
+            st.divider()
+
+            with st.expander("ℹ️ How to interpret DPO results"):
+                st.markdown("""
+                - **Positive margin** → The model already tends to prefer your "Best" choice ✅
+                - **Negative margin** → The model prefers your "Worst" choice (needs training) ⚠️
+                - **Lower loss** → Less correction needed
+
+                The DPO loss would be used to update model weights, making it more likely
+                to generate responses similar to your "Best" choice.
+                """)
+
         with tab2:
             st.markdown("### Group Relative Policy Optimization (GRPO)")
             st.markdown("*Analyzes all 3 responses together*")
@@ -632,25 +644,17 @@ def main():
                 col2.metric("Reward", f"{reward:.2f}", label_visibility="collapsed")
                 col3.metric("Advantage", f"{adv:+.4f}", label_visibility="collapsed")
 
-        with tab3:
-            st.markdown("### What do these numbers mean?")
+            st.divider()
 
-            st.markdown("""
-            #### DPO Interpretation
-            - **Positive margin** → The model already tends to prefer your "Best" choice ✅
-            - **Negative margin** → The model prefers your "Worst" choice (needs training) ⚠️
-            - **Lower loss** → Less correction needed
+            with st.expander("ℹ️ How to interpret GRPO results"):
+                st.markdown("""
+                - **Positive advantage** → Response is above average for this group
+                - **Zero advantage** → Response is exactly average
+                - **Negative advantage** → Response is below average
 
-            #### GRPO Interpretation
-            - **Positive advantage** → Response is above average for this group
-            - **Zero advantage** → Response is exactly average
-            - **Negative advantage** → Response is below average
-
-            #### In Practice
-            These signals would be used to update the model's weights via gradient descent,
-            making it more likely to generate responses similar to your "Best" choice
-            and less likely to generate responses like your "Worst" choice.
-            """)
+                GRPO uses all 3 responses to compute group-relative advantages,
+                which helps the model learn from the full ranking, not just Best vs Worst.
+                """)
 
 
 if __name__ == "__main__":
