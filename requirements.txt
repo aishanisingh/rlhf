@@ -1,0 +1,17 @@
+# TriFetch Online RLHF Workbench Dependencies
+
+# Core ML/DL
+torch>=2.0.0
+transformers>=4.35.0
+
+# Web UI
+streamlit>=1.28.0
+
+# Optional: OpenAI-compatible API support
+openai>=1.0.0
+
+# Utilities
+numpy>=1.24.0
+
+# Optional: For Colab compatibility
+# accelerate>=0.24.0
