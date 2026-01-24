@@ -9,7 +9,7 @@ from enum import Enum
 # Page configuration
 st.set_page_config(
     page_title="RLHF Workbench",
-    page_icon="🏥",
+    page_icon=":hospital:",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -417,11 +417,11 @@ def compute_grpo_signals(traces: List[Dict], rankings: Dict[str, str]):
 
 def main():
     # Header
-    st.markdown('<p class="main-header">🏥 RLHF Workbench</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">RLHF Workbench</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Reinforcement Learning from Human Feedback for Medical AI</p>', unsafe_allow_html=True)
 
     # Introduction
-    with st.expander("📖 What is this tool?", expanded=True):
+    with st.expander("What is this tool?", expanded=True):
         st.markdown("""
         ### Purpose
         This workbench demonstrates **Reinforcement Learning from Human Feedback (RLHF)** -
@@ -445,7 +445,7 @@ def main():
 
     # Sidebar
     with st.sidebar:
-        st.header("⚙️ Settings")
+        st.header("Settings")
 
         st.subheader("DPO Parameters")
         beta = st.slider(
@@ -467,7 +467,7 @@ def main():
 
         st.divider()
 
-        with st.expander("ℹ️ About the Methods"):
+        with st.expander("About the Methods"):
             st.markdown("""
             **DPO (Direct Preference Optimization)**
             - Compares Best vs Worst traces
@@ -484,7 +484,7 @@ def main():
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        st.subheader("📋 Select Case")
+        st.subheader("Select Case")
         selected_id = st.selectbox(
             "Medical case:",
             list(SAMPLES.keys()),
@@ -495,7 +495,7 @@ def main():
     traces = TRACES[selected_id]
 
     # Question display
-    st.subheader("🩺 Clinical Scenario")
+    st.subheader("Clinical Scenario")
 
     with st.container(border=True):
         st.markdown(sample["question"])
@@ -506,7 +506,7 @@ def main():
             st.info(f"**Topic: {sample['topic']}**")
 
     # Instructions
-    st.subheader("📝 Your Task: Rank the AI Responses")
+    st.subheader("Your Task: Rank the AI Responses")
 
     st.markdown("""
     <div class="info-box">
@@ -540,14 +540,13 @@ def main():
 
             rank = st.selectbox(
                 f"Your ranking:",
-                ["— Select —", "🥇 Best", "🥈 Middle", "🥉 Worst"],
+                ["— Select —", "Best", "Middle", "Worst"],
                 key=f"rank_{selected_id}_{trace['id']}",
                 label_visibility="collapsed"
             )
 
             if rank != "— Select —":
-                clean_rank = rank.split(" ")[1]  # Remove emoji
-                st.session_state.rankings[selected_id][trace["id"]] = clean_rank
+                st.session_state.rankings[selected_id][trace["id"]] = rank
 
     # Validation
     rankings = st.session_state.rankings[selected_id]
@@ -555,7 +554,7 @@ def main():
     valid = len(assigned) == 3 and set(assigned) == {"Best", "Middle", "Worst"}
 
     if assigned and not valid:
-        st.warning("⚠️ Please assign exactly one response to each rank (Best, Middle, Worst)")
+        st.warning("Please assign exactly one response to each rank (Best, Middle, Worst)")
 
     # Compute button
     st.divider()
@@ -563,7 +562,7 @@ def main():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         clicked = st.button(
-            "🔬 Compute Optimization Signals",
+            "Compute Optimization Signals",
             type="primary",
             disabled=not valid,
             use_container_width=True
@@ -576,9 +575,9 @@ def main():
         dpo = compute_dpo_signals(chosen_trace["text"], rejected_trace["text"], beta)
         grpo = compute_grpo_signals(traces, rankings)
 
-        st.success("✅ Optimization signals computed successfully!")
+        st.success("Optimization signals computed successfully!")
 
-        st.subheader("📊 Results")
+        st.subheader("Results")
 
         tab1, tab2 = st.tabs(["DPO Analysis", "GRPO Analysis"])
 
@@ -596,23 +595,23 @@ def main():
             col1, col2 = st.columns(2)
 
             with col1:
-                st.markdown("**🥇 Best Response (Chosen)**")
+                st.markdown("**Best Response (Chosen)**")
                 st.metric("Implicit Reward", f"{dpo['chosen_reward']:.4f}")
                 st.caption(f"Policy log-prob: {dpo['chosen_policy_lp']:.2f}")
                 st.caption(f"Reference log-prob: {dpo['chosen_ref_lp']:.2f}")
 
             with col2:
-                st.markdown("**🥉 Worst Response (Rejected)**")
+                st.markdown("**Worst Response (Rejected)**")
                 st.metric("Implicit Reward", f"{dpo['rejected_reward']:.4f}")
                 st.caption(f"Policy log-prob: {dpo['rejected_policy_lp']:.2f}")
                 st.caption(f"Reference log-prob: {dpo['rejected_ref_lp']:.2f}")
 
             st.divider()
 
-            with st.expander("ℹ️ How to interpret DPO results"):
+            with st.expander("How to interpret DPO results"):
                 st.markdown("""
-                - **Positive margin** → The model already tends to prefer your "Best" choice ✅
-                - **Negative margin** → The model prefers your "Worst" choice (needs training) ⚠️
+                - **Positive margin** → The model already tends to prefer your "Best" choice
+                - **Negative margin** → The model prefers your "Worst" choice (needs training)
                 - **Lower loss** → Less correction needed
 
                 The DPO loss would be used to update model weights, making it more likely
@@ -638,23 +637,23 @@ def main():
             worst_trace = next(t for t in traces if rankings[t["id"]] == "Worst")
 
             with col1:
-                st.markdown("**🥇 Best Response**")
+                st.markdown("**Best Response**")
                 st.metric("Reward", f"{grpo['rewards'][best_trace['id']]:.2f}")
                 st.metric("Advantage", f"{grpo['advantages'][best_trace['id']]:+.4f}")
 
             with col2:
-                st.markdown("**🥈 Middle Response**")
+                st.markdown("**Middle Response**")
                 st.metric("Reward", f"{grpo['rewards'][middle_trace['id']]:.2f}")
                 st.metric("Advantage", f"{grpo['advantages'][middle_trace['id']]:+.4f}")
 
             with col3:
-                st.markdown("**🥉 Worst Response**")
+                st.markdown("**Worst Response**")
                 st.metric("Reward", f"{grpo['rewards'][worst_trace['id']]:.2f}")
                 st.metric("Advantage", f"{grpo['advantages'][worst_trace['id']]:+.4f}")
 
             st.divider()
 
-            with st.expander("ℹ️ How to interpret GRPO results"):
+            with st.expander("How to interpret GRPO results"):
                 st.markdown("""
                 - **Positive advantage** → Response is above average for this group
                 - **Zero advantage** → Response is exactly average
