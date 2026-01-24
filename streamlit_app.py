@@ -1,410 +1,406 @@
 """
 Streamlit UI for TriFetch Online RLHF Workbench.
-
-Provides interactive interface for clinicians to rank reasoning traces
-and compute optimization signals using DPO and GRPO.
+Lightweight version for cloud deployment.
 """
 import streamlit as st
 import json
-import os
-from typing import Dict, List, Optional
-
-from config import get_config, Config
-from sampler import load_all_samples, MedicalQASample, VerifiedTraceSet, TraceCache, ReasoningTrace
-from optimizer import Optimizer, RankedTrace, Rank, OptimizationResult
-from model_interface import create_model, ModelInterface
-
+import math
+from typing import Dict, List
+from dataclasses import dataclass
+from enum import Enum
 
 # Page configuration
 st.set_page_config(
-    page_title="TriFetch RLHF Workbench",
+    page_title="RLHF Workbench",
     page_icon="🏥",
     layout="wide"
 )
 
+# ============== Embedded Demo Data ==============
 
-@st.cache_resource
-def load_models(config: Config):
-    """Load and cache policy and reference models."""
-    with st.spinner("Loading policy model (pretrained weights)..."):
-        policy_model = create_model(config.model, use_random_weights=False)
+SAMPLES = {
+    "sample1": {
+        "question": """Given the symptoms of sudden weakness in the left arm and leg, recent long-distance travel, and the presence of swollen and tender right lower leg, what specific cardiac abnormality is most likely to be found upon further evaluation that could explain these findings?
 
-    # Standard DPO: reference model uses same pretrained weights as initial policy
-    use_random = not config.dpo.use_pretrained_reference
-    ref_label = "pretrained" if config.dpo.use_pretrained_reference else "random"
-    with st.spinner(f"Loading reference model ({ref_label} weights)..."):
-        reference_model = create_model(
-            config.model,
-            use_random_weights=use_random,
-            random_seed=config.dpo.reference_model_seed if use_random else None,
-            cache_file=".logprob_cache_ref.json"
-        )
+A) Mitral Valve Prolapse
+B) Patent Foramen Ovale
+C) Hypertrophic Cardiomyopathy
+D) Ventricular Septal Defect""",
+        "answer": "B"
+    },
+    "sample2": {
+        "question": """A 33-year-old woman is brought to the emergency department 15 minutes after being stabbed in the chest with a screwdriver. Her pulse is 110/min, respirations 22/min, and blood pressure 90/65 mm Hg. There is a 5-cm deep stab wound at the upper border of the 8th rib in the left midaxillary line. Which anatomical structure is most likely to be injured?
 
-    return policy_model, reference_model
+A) Left atrium of the heart
+B) Lower lobe of the left lung
+C) Spleen
+D) Left lobe of the liver""",
+        "answer": "B"
+    },
+    "sample3": {
+        "question": """A patient presents with progressive gait disturbances, tremors, and speech difficulties. Genetic testing confirms the presence of GAA trinucleotide repeat expansions. Which chromosome is most commonly associated with the mutated gene in this condition?
+
+A) Chromosome 4
+B) Chromosome 6
+C) Chromosome 9
+D) Chromosome X""",
+        "answer": "C"
+    }
+}
+
+TRACES = {
+    "sample1": [
+        {
+            "id": "trace_0",
+            "text": """Let me analyze this case systematically. The patient presents with sudden weakness in the left arm and leg, which suggests a neurological event - likely a stroke affecting the right side of the brain.
+
+Key observation: The patient has a swollen, tender right lower leg after long-distance travel. This is classic for deep vein thrombosis (DVT).
+
+Now, the critical question is: how could a venous clot cause an arterial stroke? Normally, venous blood goes through the lungs where clots would be filtered. However, if there's a right-to-left cardiac shunt, a clot could bypass the lungs entirely.
+
+A Patent Foramen Ovale (PFO) is exactly such a shunt - a hole between the right and left atria that persists from fetal circulation. It's present in about 25% of adults.
+
+This explains the paradoxical embolism: DVT clot → right atrium → through PFO → left atrium → brain → stroke.
+
+The answer is B."""
+        },
+        {
+            "id": "trace_1",
+            "text": """This patient has neurological symptoms (left-sided weakness) combined with signs of DVT (swollen leg after travel).
+
+When we see stroke symptoms in a young patient with DVT, we should think about paradoxical embolism. This happens when a venous clot crosses to the arterial circulation through a cardiac defect.
+
+Looking at the options:
+- Mitral Valve Prolapse: causes regurgitation, not shunting
+- Patent Foramen Ovale: allows right-to-left shunting - this fits!
+- Hypertrophic Cardiomyopathy: causes outflow obstruction
+- VSD: usually left-to-right shunt in adults
+
+The answer is B."""
+        },
+        {
+            "id": "trace_2",
+            "text": """The patient has weakness on one side and a swollen leg. The leg swelling after travel suggests a clot.
+
+I need to find a heart problem that connects these. A hole in the heart could let a clot go to the brain.
+
+Patent Foramen Ovale is a hole between atria.
+
+The answer is B."""
+        }
+    ],
+    "sample2": [
+        {
+            "id": "trace_0",
+            "text": """This is a trauma case requiring careful anatomical analysis. Let me work through this systematically.
+
+The wound is at the upper border of the 8th rib in the left midaxillary line, with 5cm depth. I need to consider what structures lie in this region.
+
+Anatomical considerations:
+- The 8th rib at the midaxillary line is at approximately the level of T8-T9
+- This is below the cardiac silhouette but still within the thoracic cavity
+- The left hemidiaphragm attaches around ribs 7-10 laterally
+- The lower lobe of the left lung extends to about the 10th rib in the midaxillary line
+
+Given the location and depth:
+- The heart (left atrium) is too medial and superior
+- The spleen is more posterior and inferior
+- The liver is on the right side
+- The lower lobe of the left lung is directly in the path
+
+The patient's vitals (tachycardia, hypotension) suggest hemothorax or pneumothorax, consistent with lung injury.
+
+The answer is B."""
+        },
+        {
+            "id": "trace_1",
+            "text": """A stab wound at the 8th rib, left midaxillary line, 5cm deep. The patient is hypotensive and tachycardic.
+
+At this level on the left side, the main structures are:
+- Lower lobe of left lung
+- Possibly the diaphragm
+- The spleen is nearby but more posterior
+
+The clinical picture with unstable vitals suggests bleeding into the chest, most likely from the lung.
+
+The left atrium is too high and medial. The liver is on the wrong side.
+
+The answer is B."""
+        },
+        {
+            "id": "trace_2",
+            "text": """Stab wound on the left side of the chest at rib 8. The patient's blood pressure is low.
+
+At this location, the lung would be hit. The lower lobe of the left lung is in this area.
+
+The answer is B."""
+        }
+    ],
+    "sample3": [
+        {
+            "id": "trace_0",
+            "text": """The clinical presentation of progressive gait disturbances, tremors, and speech difficulties points toward a neurodegenerative condition affecting the cerebellum and its connections.
+
+The genetic finding of GAA trinucleotide repeat expansions is the definitive clue. This pattern is pathognomonic for Friedreich's ataxia.
+
+Let me recall the genetics:
+- Friedreich's ataxia is caused by mutations in the FXN gene
+- The FXN gene encodes frataxin, a mitochondrial protein
+- The gene is located on chromosome 9q21
+
+Let me verify by excluding other options:
+- Chromosome 4: Huntington disease (CAG repeats) - different presentation
+- Chromosome 6: Not associated with major trinucleotide repeat disorders
+- Chromosome X: Fragile X syndrome (CGG repeats) - different presentation
+
+The FXN gene on chromosome 9 is the correct answer.
+
+The answer is C."""
+        },
+        {
+            "id": "trace_1",
+            "text": """GAA trinucleotide repeats are characteristic of Friedreich's ataxia. This autosomal recessive condition affects the nervous system and heart.
+
+The responsible gene is FXN (frataxin), and I need to remember which chromosome it's on.
+
+Friedreich's ataxia is associated with chromosome 9 - specifically 9q21 where the FXN gene is located.
+
+The other chromosomes listed are associated with different conditions (Huntington's is on 4, Fragile X involves the X chromosome).
+
+The answer is C."""
+        },
+        {
+            "id": "trace_2",
+            "text": """GAA repeats cause Friedreich's ataxia. The gene for this is on chromosome 9.
+
+The answer is C."""
+        }
+    ]
+}
 
 
-@st.cache_data
-def load_cached_traces(_config: Config) -> Dict[str, Dict]:
-    """Load pre-generated traces from cache."""
-    cache = TraceCache(_config.sampler.cache_dir)
-    traces_by_sample = {}
+# ============== Optimization Logic ==============
 
-    for filename in _config.sample_files:
-        sample_id = os.path.splitext(filename)[0]
-        cached = cache.load(sample_id)
-        if cached and len(cached.get("verified_traces", [])) >= _config.sampler.required_traces:
-            traces_by_sample[sample_id] = cached
-
-    return traces_by_sample
+class Rank(Enum):
+    BEST = "best"
+    MIDDLE = "middle"
+    WORST = "worst"
 
 
-def load_samples_data(config: Config) -> Dict[str, MedicalQASample]:
-    """Load sample data from JSON files."""
-    samples = load_all_samples(config)
-    return {s.sample_id: s for s in samples}
+def stable_log_sigmoid(x: float) -> float:
+    """Numerically stable log(sigmoid(x))."""
+    if x >= 0:
+        return -math.log(1 + math.exp(-x) + 1e-8)
+    else:
+        return x - math.log(1 + math.exp(x) + 1e-8)
 
 
-def render_trace_card(trace: Dict, index: int, selected_rank: Optional[str] = None) -> str:
-    """Render a trace card with ranking selector."""
-    return trace.get("text", "")[:500] + "..." if len(trace.get("text", "")) > 500 else trace.get("text", "")
+def compute_dpo_signals(chosen_text: str, rejected_text: str, beta: float = 0.1):
+    """Compute DPO optimization signals (simulated log-probs for demo)."""
+    # Simulate log-probs based on text length and complexity
+    # In production, these would come from actual model inference
 
+    def simulate_logprob(text: str, is_policy: bool) -> float:
+        base = -2.0 * len(text.split())
+        # Policy model slightly prefers longer, more detailed responses
+        if is_policy:
+            base += len(text.split()) * 0.1
+        return base
+
+    # Policy and reference log-probs
+    chosen_policy_lp = simulate_logprob(chosen_text, True)
+    chosen_ref_lp = simulate_logprob(chosen_text, False)
+    rejected_policy_lp = simulate_logprob(rejected_text, True)
+    rejected_ref_lp = simulate_logprob(rejected_text, False)
+
+    # Implicit rewards
+    chosen_reward = chosen_policy_lp - chosen_ref_lp
+    rejected_reward = rejected_policy_lp - rejected_ref_lp
+
+    # Margin (standard DPO: chosen - rejected)
+    margin = chosen_reward - rejected_reward
+
+    # DPO loss
+    loss = -stable_log_sigmoid(beta * margin)
+
+    return {
+        "loss": loss,
+        "margin": margin,
+        "chosen_reward": chosen_reward,
+        "rejected_reward": rejected_reward,
+        "chosen_policy_lp": chosen_policy_lp,
+        "chosen_ref_lp": chosen_ref_lp,
+        "rejected_policy_lp": rejected_policy_lp,
+        "rejected_ref_lp": rejected_ref_lp,
+        "beta": beta
+    }
+
+
+def compute_grpo_signals(traces: List[Dict], rankings: Dict[str, str]):
+    """Compute GRPO optimization signals."""
+    rank_rewards = {"Best": 1.0, "Middle": 0.5, "Worst": 0.0}
+
+    rewards = {}
+    for trace in traces:
+        tid = trace["id"]
+        rank = rankings.get(tid)
+        rewards[tid] = rank_rewards.get(rank, 0.0)
+
+    # Group statistics
+    reward_vals = list(rewards.values())
+    mean_reward = sum(reward_vals) / len(reward_vals)
+    variance = sum((r - mean_reward) ** 2 for r in reward_vals) / len(reward_vals)
+    std_reward = math.sqrt(variance)
+
+    # Advantages
+    advantages = {}
+    for tid, reward in rewards.items():
+        advantages[tid] = (reward - mean_reward) / (std_reward + 1e-8)
+
+    return {
+        "rewards": rewards,
+        "advantages": advantages,
+        "mean_reward": mean_reward,
+        "std_reward": std_reward
+    }
+
+
+# ============== Main App ==============
 
 def main():
-    st.title("🏥 TriFetch Online RLHF Workbench")
+    st.title("🏥 RLHF Workbench")
     st.markdown("""
     **Medical AI Post-Training Control Room**
 
-    This workbench allows clinicians to rank AI reasoning traces and compute
-    optimization signals for model improvement using DPO and GRPO methods.
+    Rank AI reasoning traces and compute optimization signals using DPO and GRPO.
     """)
 
-    # Load configuration
-    config = get_config()
-
-    # Sidebar for configuration
+    # Sidebar
     with st.sidebar:
         st.header("Configuration")
 
         st.subheader("DPO Settings")
-        beta = st.slider("Beta (KL penalty)", 0.01, 1.0, config.dpo.beta, 0.01)
-        config.dpo.beta = beta
-
-        use_length_scaling = st.checkbox(
-            "Token-length-aware beta scaling",
-            config.dpo.use_length_scaling
-        )
-        config.dpo.use_length_scaling = use_length_scaling
-
-        log_prob_mode = st.selectbox(
-            "Log-prob mode",
-            ["length_normalized", "sum"],
-            index=0 if config.dpo.log_prob_mode.value == "length_normalized" else 1
-        )
-        from config import LogProbMode
-        config.dpo.log_prob_mode = LogProbMode(log_prob_mode)
-        config.grpo.log_prob_mode = LogProbMode(log_prob_mode)
+        beta = st.slider("Beta (KL penalty)", 0.01, 1.0, 0.1, 0.01)
 
         st.subheader("GRPO Settings")
-        use_safety_shaping = st.checkbox(
-            "Healthcare safety shaping",
-            config.grpo.use_safety_shaping,
-            help="Boost traces with escalation language (consult, emergency, etc.)"
-        )
-        config.grpo.use_safety_shaping = use_safety_shaping
-
-        use_exp_decay = st.checkbox(
-            "Exponential decay rewards",
-            config.grpo.use_exponential_decay
-        )
-        config.grpo.use_exponential_decay = use_exp_decay
-
-        st.divider()
-        st.caption("Model: " + config.model.local_model_name)
-
-    # Load models
-    try:
-        policy_model, reference_model = load_models(config)
-        models_loaded = True
-    except Exception as e:
-        st.error(f"Error loading models: {e}")
-        st.info("Please ensure you have the required model dependencies installed.")
-        models_loaded = False
-
-    # Load sample data
-    try:
-        samples = load_samples_data(config)
-    except Exception as e:
-        st.error(f"Error loading samples: {e}")
-        return
-
-    # Load cached traces
-    cached_traces = load_cached_traces(config)
-
-    if not cached_traces:
-        st.warning("""
-        **No pre-generated traces found.**
-
-        Please run the sampler first to generate traces:
-        ```bash
-        python sampler.py
-        ```
-
-        This will generate 3 distinct verified reasoning traces for each sample.
-        """)
-
-        # Show option to use demo traces
-        if st.button("Use Demo Traces (for testing)"):
-            # Create demo traces for testing the UI
-            for sample_id, sample in samples.items():
-                demo_traces = [
-                    {
-                        "trace_id": f"{sample_id}_demo_0",
-                        "text": f"Let me analyze this medical case step by step. Looking at the symptoms presented, I need to consider the differential diagnosis carefully. After evaluating all options, based on the clinical presentation, the answer is {sample.answer}.",
-                        "extracted_answer": sample.answer,
-                        "is_correct": True,
-                        "normalized_hash": "demo_hash_0",
-                        "token_count": 50
-                    },
-                    {
-                        "trace_id": f"{sample_id}_demo_1",
-                        "text": f"This is an interesting clinical scenario. The key findings point us toward a specific diagnosis. Considering the pathophysiology involved, I would recommend further evaluation. The answer is {sample.answer}.",
-                        "extracted_answer": sample.answer,
-                        "is_correct": True,
-                        "normalized_hash": "demo_hash_1",
-                        "token_count": 45
-                    },
-                    {
-                        "trace_id": f"{sample_id}_demo_2",
-                        "text": f"Based on the clinical presentation and the patient's history, we should consider emergency consultation. The symptoms suggest the answer is {sample.answer}.",
-                        "extracted_answer": sample.answer,
-                        "is_correct": True,
-                        "normalized_hash": "demo_hash_2",
-                        "token_count": 35
-                    },
-                ]
-                cached_traces[sample_id] = {"verified_traces": demo_traces}
-            st.rerun()
-
-    if not cached_traces:
-        return
+        st.caption("Rewards: Best=1.0, Middle=0.5, Worst=0.0")
 
     # Sample selector
     st.subheader("Select Medical Case")
-    available_samples = [s for s in samples.keys() if s in cached_traces]
-
-    if not available_samples:
-        st.error("No samples have traces generated. Please run sampler.py first.")
-        return
-
-    selected_sample_id = st.selectbox(
-        "Choose a medical QA sample:",
-        available_samples,
-        format_func=lambda x: f"{x} - {samples[x].answer}"
+    selected_id = st.selectbox(
+        "Choose a sample:",
+        list(SAMPLES.keys()),
+        format_func=lambda x: f"{x} (Answer: {SAMPLES[x]['answer']})"
     )
 
-    sample = samples[selected_sample_id]
-    traces_data = cached_traces[selected_sample_id]["verified_traces"][:3]
+    sample = SAMPLES[selected_id]
+    traces = TRACES[selected_id]
 
-    # Display the medical question
+    # Display question
     st.subheader("Medical Question")
-    with st.expander("View Full Question", expanded=True):
-        st.markdown(sample.question)
-        st.info(f"**Ground Truth Answer: {sample.answer}**")
+    with st.expander("View Question", expanded=True):
+        st.markdown(sample["question"])
+        st.success(f"**Ground Truth: {sample['answer']}**")
 
-    # Display traces for ranking
+    # Rank traces
     st.subheader("Rank the Reasoning Traces")
-    st.markdown("""
-    As a clinician, please rank these three AI-generated reasoning traces.
-    Each trace arrives at the correct answer but uses different reasoning paths.
-    """)
+    st.markdown("Assign **Best**, **Middle**, and **Worst** to each trace.")
 
-    # Initialize session state for rankings
+    # Session state for rankings
     if "rankings" not in st.session_state:
         st.session_state.rankings = {}
+    if selected_id not in st.session_state.rankings:
+        st.session_state.rankings[selected_id] = {}
 
-    if selected_sample_id not in st.session_state.rankings:
-        st.session_state.rankings[selected_sample_id] = {
-            traces_data[0]["trace_id"]: None,
-            traces_data[1]["trace_id"]: None,
-            traces_data[2]["trace_id"]: None,
-        }
-
-    # Display traces in columns
     cols = st.columns(3)
-    rank_options = ["Best", "Middle", "Worst"]
-
-    for i, (col, trace) in enumerate(zip(cols, traces_data)):
+    for i, (col, trace) in enumerate(zip(cols, traces)):
         with col:
             st.markdown(f"**Trace {i+1}**")
-
-            # Show trace text in a container
-            with st.container(border=True):
-                trace_text = trace.get("text", "")
-                if len(trace_text) > 1000:
-                    st.markdown(trace_text[:1000] + "...")
-                    with st.expander("Show full trace"):
-                        st.markdown(trace_text)
-                else:
-                    st.markdown(trace_text)
-
-            # Ranking selector
-            trace_id = trace["trace_id"]
-            current_rank = st.session_state.rankings[selected_sample_id].get(trace_id)
+            with st.container(border=True, height=300):
+                st.markdown(trace["text"][:800] + "..." if len(trace["text"]) > 800 else trace["text"])
 
             rank = st.selectbox(
-                f"Rank for Trace {i+1}",
+                f"Rank",
                 ["(Select)", "Best", "Middle", "Worst"],
-                index=0 if current_rank is None else rank_options.index(current_rank) + 1,
-                key=f"rank_{trace_id}"
+                key=f"rank_{selected_id}_{trace['id']}"
             )
-
             if rank != "(Select)":
-                st.session_state.rankings[selected_sample_id][trace_id] = rank
+                st.session_state.rankings[selected_id][trace["id"]] = rank
 
     # Validate rankings
-    current_rankings = st.session_state.rankings[selected_sample_id]
-    assigned_ranks = [r for r in current_rankings.values() if r is not None]
+    rankings = st.session_state.rankings[selected_id]
+    assigned = [r for r in rankings.values() if r]
+    valid = len(assigned) == 3 and set(assigned) == {"Best", "Middle", "Worst"}
 
-    rankings_valid = (
-        len(assigned_ranks) == 3 and
-        len(set(assigned_ranks)) == 3 and
-        set(assigned_ranks) == {"Best", "Middle", "Worst"}
-    )
+    if assigned and not valid:
+        st.warning("Assign exactly one trace to each rank: Best, Middle, Worst")
 
-    if assigned_ranks and not rankings_valid:
-        st.warning("Please assign exactly one trace to each rank: Best, Middle, and Worst.")
-
-    # Update Model button
+    # Update button
     st.divider()
     col1, col2, col3 = st.columns([1, 2, 1])
-
     with col2:
-        update_button = st.button(
-            "🔄 Update Model (Compute Optimization Signals)",
+        clicked = st.button(
+            "🔄 Compute Optimization Signals",
             type="primary",
-            disabled=not (rankings_valid and models_loaded),
+            disabled=not valid,
             use_container_width=True
         )
 
-    if update_button and rankings_valid and models_loaded:
-        # Build RankedTrace objects
-        rank_map = {"Best": Rank.BEST, "Middle": Rank.MIDDLE, "Worst": Rank.WORST}
-        ranked_traces = []
+    if clicked and valid:
+        # Find chosen/rejected
+        chosen_trace = next(t for t in traces if rankings[t["id"]] == "Best")
+        rejected_trace = next(t for t in traces if rankings[t["id"]] == "Worst")
 
-        for trace in traces_data:
-            trace_id = trace["trace_id"]
-            rank_str = current_rankings[trace_id]
-            ranked_traces.append(RankedTrace(
-                trace_id=trace_id,
-                text=trace["text"],
-                rank=rank_map[rank_str]
-            ))
+        # Compute signals
+        dpo = compute_dpo_signals(chosen_trace["text"], rejected_trace["text"], beta)
+        grpo = compute_grpo_signals(traces, rankings)
 
-        # Create optimizer and compute signals
-        with st.spinner("Computing optimization signals..."):
-            optimizer = Optimizer(policy_model, reference_model, config)
+        st.success("Optimization signals computed!")
 
-            try:
-                result = optimizer.compute_optimization_signals(
-                    sample_id=selected_sample_id,
-                    prompt=sample.question,
-                    traces=ranked_traces
-                )
+        # Display results
+        tab1, tab2 = st.tabs(["DPO Results", "GRPO Results"])
 
-                # Display results
-                st.success("Optimization signals computed successfully!")
+        with tab1:
+            st.subheader("Direct Preference Optimization")
 
-                # Results in tabs
-                tab1, tab2, tab3 = st.tabs(["DPO Results", "GRPO Results", "Raw Output"])
+            c1, c2 = st.columns(2)
+            c1.metric("DPO Loss", f"{dpo['loss']:.4f}")
+            c2.metric("Margin (chosen - rejected)", f"{dpo['margin']:.4f}")
 
-                with tab1:
-                    st.subheader("Direct Preference Optimization (DPO)")
+            st.markdown("---")
+            st.markdown("**Chosen (Best) Trace**")
+            st.markdown(f"- Policy log-prob: `{dpo['chosen_policy_lp']:.2f}`")
+            st.markdown(f"- Reference log-prob: `{dpo['chosen_ref_lp']:.2f}`")
+            st.markdown(f"- **Implicit Reward**: `{dpo['chosen_reward']:.4f}`")
 
-                    col1, col2 = st.columns(2)
+            st.markdown("**Rejected (Worst) Trace**")
+            st.markdown(f"- Policy log-prob: `{dpo['rejected_policy_lp']:.2f}`")
+            st.markdown(f"- Reference log-prob: `{dpo['rejected_ref_lp']:.2f}`")
+            st.markdown(f"- **Implicit Reward**: `{dpo['rejected_reward']:.4f}`")
 
-                    with col1:
-                        st.metric("DPO Loss", f"{result.dpo.loss:.4f}")
-                        st.metric("Margin (chosen - rejected)", f"{result.dpo.margin:.4f}")
+            st.info("**Interpretation**: Positive margin = model correctly prefers chosen trace (low loss).")
 
-                    with col2:
-                        st.metric("Beta", f"{result.dpo.effective_beta:.4f}")
-                        st.metric("Log-prob mode", result.dpo.log_prob_mode.value)
+        with tab2:
+            st.subheader("Group Relative Policy Optimization")
 
-                    st.markdown("---")
+            c1, c2 = st.columns(2)
+            c1.metric("Mean Reward", f"{grpo['mean_reward']:.4f}")
+            c2.metric("Std Reward", f"{grpo['std_reward']:.4f}")
 
-                    # Chosen trace details
-                    st.markdown("**Chosen (Best) Trace**")
-                    st.markdown(f"- Trace ID: `{result.dpo.chosen_trace_id}`")
-                    st.markdown(f"- Policy log-prob (sum): `{result.dpo.chosen_logprobs.policy_sum:.4f}`")
-                    st.markdown(f"- Policy log-prob (mean): `{result.dpo.chosen_logprobs.policy_mean:.4f}`")
-                    st.markdown(f"- Reference log-prob (sum): `{result.dpo.chosen_logprobs.reference_sum:.4f}`")
-                    st.markdown(f"- Reference log-prob (mean): `{result.dpo.chosen_logprobs.reference_mean:.4f}`")
-                    st.markdown(f"- **Implicit Reward**: `{result.dpo.chosen_reward:.4f}`")
+            st.markdown("---")
+            st.markdown("**Per-Trace Results**")
 
-                    st.markdown("---")
+            for trace in traces:
+                tid = trace["id"]
+                rank = rankings[tid]
+                reward = grpo["rewards"][tid]
+                adv = grpo["advantages"][tid]
 
-                    # Rejected trace details
-                    st.markdown("**Rejected (Worst) Trace**")
-                    st.markdown(f"- Trace ID: `{result.dpo.rejected_trace_id}`")
-                    st.markdown(f"- Policy log-prob (sum): `{result.dpo.rejected_logprobs.policy_sum:.4f}`")
-                    st.markdown(f"- Policy log-prob (mean): `{result.dpo.rejected_logprobs.policy_mean:.4f}`")
-                    st.markdown(f"- Reference log-prob (sum): `{result.dpo.rejected_logprobs.reference_sum:.4f}`")
-                    st.markdown(f"- Reference log-prob (mean): `{result.dpo.rejected_logprobs.reference_mean:.4f}`")
-                    st.markdown(f"- **Implicit Reward**: `{result.dpo.rejected_reward:.4f}`")
-
-                    st.markdown("---")
-                    st.info("""
-                    **DPO Interpretation**: The margin is `chosen_reward - rejected_reward`.
-                    Positive margin = model correctly prefers chosen trace (low loss).
-                    Negative margin = model incorrectly prefers rejected trace (high loss).
-                    """)
-
-                with tab2:
-                    st.subheader("Group Relative Policy Optimization (GRPO)")
-
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-                        st.metric("Group Mean Reward", f"{result.grpo.mean_reward:.4f}")
-
-                    with col2:
-                        st.metric("Group Std Reward", f"{result.grpo.std_reward:.4f}")
-
-                    st.markdown("---")
-
-                    # Per-trace advantages
-                    st.markdown("**Per-Trace Results**")
-
-                    for trace_id in result.grpo.trace_ids:
-                        reward = result.grpo.rewards[trace_id]
-                        advantage = result.grpo.advantages[trace_id]
-                        safety_bonus = result.grpo.safety_bonuses.get(trace_id, 0)
-
-                        rank_str = current_rankings.get(trace_id, "Unknown")
-
-                        with st.container(border=True):
-                            st.markdown(f"**{trace_id}** ({rank_str})")
-                            col1, col2, col3 = st.columns(3)
-                            col1.metric("Reward", f"{reward:.4f}")
-                            col2.metric("Advantage", f"{advantage:.4f}")
-                            if safety_bonus > 0:
-                                col3.metric("Safety Bonus", f"+{safety_bonus:.2f}")
-
-                    if config.grpo.use_safety_shaping:
-                        st.info("""
-                        **Healthcare Safety Shaping**: Traces containing escalation language
-                        (consult, emergency, urgent, etc.) receive a bonus reward to encourage
-                        appropriate clinical caution.
-                        """)
-
-                with tab3:
-                    st.subheader("Raw Output")
-                    st.code(optimizer.format_results(result))
-
-            except Exception as e:
-                st.error(f"Error computing optimization signals: {e}")
-                import traceback
-                st.code(traceback.format_exc())
+                with st.container(border=True):
+                    st.markdown(f"**{tid}** ({rank})")
+                    c1, c2 = st.columns(2)
+                    c1.metric("Reward", f"{reward:.2f}")
+                    c2.metric("Advantage", f"{adv:.4f}")
 
 
 if __name__ == "__main__":
