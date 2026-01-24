@@ -589,23 +589,23 @@ def main():
             col1, col2, col3 = st.columns(3)
             col1.metric("DPO Loss", f"{dpo['loss']:.4f}", help="Lower = model already prefers Best")
             col2.metric("Preference Margin", f"{dpo['margin']:.4f}", help="Positive = correct preference")
-            col3.metric("Beta (β)", f"{beta}", help="KL penalty coefficient")
+            col3.metric("Beta", f"{beta}", help="KL penalty coefficient")
 
             st.divider()
 
-            st.markdown("**Per-Response Rewards**")
+            col1, col2 = st.columns(2)
 
-            # Best
-            col1, col2, col3 = st.columns([2, 1, 1])
-            col1.markdown(f"🥇 **Best** (Response {traces.index(chosen_trace) + 1})")
-            col2.metric("Reward", f"{dpo['chosen_reward']:.4f}", label_visibility="collapsed")
-            col3.caption(f"Policy: {dpo['chosen_policy_lp']:.1f} | Ref: {dpo['chosen_ref_lp']:.1f}")
+            with col1:
+                st.markdown("**🥇 Best Response (Chosen)**")
+                st.metric("Implicit Reward", f"{dpo['chosen_reward']:.4f}")
+                st.caption(f"Policy log-prob: {dpo['chosen_policy_lp']:.2f}")
+                st.caption(f"Reference log-prob: {dpo['chosen_ref_lp']:.2f}")
 
-            # Worst
-            col1, col2, col3 = st.columns([2, 1, 1])
-            col1.markdown(f"🥉 **Worst** (Response {traces.index(rejected_trace) + 1})")
-            col2.metric("Reward", f"{dpo['rejected_reward']:.4f}", label_visibility="collapsed")
-            col3.caption(f"Policy: {dpo['rejected_policy_lp']:.1f} | Ref: {dpo['rejected_ref_lp']:.1f}")
+            with col2:
+                st.markdown("**🥉 Worst Response (Rejected)**")
+                st.metric("Implicit Reward", f"{dpo['rejected_reward']:.4f}")
+                st.caption(f"Policy log-prob: {dpo['rejected_policy_lp']:.2f}")
+                st.caption(f"Reference log-prob: {dpo['rejected_ref_lp']:.2f}")
 
             st.divider()
 
@@ -630,20 +630,27 @@ def main():
 
             st.divider()
 
-            st.markdown("**Per-Response Advantages**")
+            col1, col2, col3 = st.columns(3)
 
-            for trace in traces:
-                tid = trace["id"]
-                rank = rankings[tid]
-                reward = grpo["rewards"][tid]
-                adv = grpo["advantages"][tid]
+            # Get traces by rank
+            best_trace = next(t for t in traces if rankings[t["id"]] == "Best")
+            middle_trace = next(t for t in traces if rankings[t["id"]] == "Middle")
+            worst_trace = next(t for t in traces if rankings[t["id"]] == "Worst")
 
-                emoji = "🥇" if rank == "Best" else "🥈" if rank == "Middle" else "🥉"
+            with col1:
+                st.markdown("**🥇 Best Response**")
+                st.metric("Reward", f"{grpo['rewards'][best_trace['id']]:.2f}")
+                st.metric("Advantage", f"{grpo['advantages'][best_trace['id']]:+.4f}")
 
-                col1, col2, col3 = st.columns([2, 1, 1])
-                col1.markdown(f"{emoji} **{rank}** (Response {traces.index(trace) + 1})")
-                col2.metric("Reward", f"{reward:.2f}", label_visibility="collapsed")
-                col3.metric("Advantage", f"{adv:+.4f}", label_visibility="collapsed")
+            with col2:
+                st.markdown("**🥈 Middle Response**")
+                st.metric("Reward", f"{grpo['rewards'][middle_trace['id']]:.2f}")
+                st.metric("Advantage", f"{grpo['advantages'][middle_trace['id']]:+.4f}")
+
+            with col3:
+                st.markdown("**🥉 Worst Response**")
+                st.metric("Reward", f"{grpo['rewards'][worst_trace['id']]:.2f}")
+                st.metric("Advantage", f"{grpo['advantages'][worst_trace['id']]:+.4f}")
 
             st.divider()
 
