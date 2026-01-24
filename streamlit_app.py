@@ -589,23 +589,23 @@ def main():
             col1, col2, col3 = st.columns(3)
             col1.metric("DPO Loss", f"{dpo['loss']:.4f}", help="Lower = model already prefers Best")
             col2.metric("Preference Margin", f"{dpo['margin']:.4f}", help="Positive = correct preference")
-            col3.metric("Beta", f"{beta}", help="KL penalty coefficient")
+            col3.metric("Beta (β)", f"{beta}", help="KL penalty coefficient")
 
             st.divider()
 
-            col1, col2 = st.columns(2)
+            st.markdown("**Per-Response Rewards**")
 
-            with col1:
-                st.markdown("**🥇 Best Response (Chosen)**")
-                st.metric("Implicit Reward", f"{dpo['chosen_reward']:.4f}")
-                st.caption(f"Policy log-prob: {dpo['chosen_policy_lp']:.2f}")
-                st.caption(f"Reference log-prob: {dpo['chosen_ref_lp']:.2f}")
+            # Best
+            col1, col2, col3 = st.columns([2, 1, 1])
+            col1.markdown(f"🥇 **Best** (Response {traces.index(chosen_trace) + 1})")
+            col2.metric("Reward", f"{dpo['chosen_reward']:.4f}", label_visibility="collapsed")
+            col3.caption(f"Policy: {dpo['chosen_policy_lp']:.1f} | Ref: {dpo['chosen_ref_lp']:.1f}")
 
-            with col2:
-                st.markdown("**🥉 Worst Response (Rejected)**")
-                st.metric("Implicit Reward", f"{dpo['rejected_reward']:.4f}")
-                st.caption(f"Policy log-prob: {dpo['rejected_policy_lp']:.2f}")
-                st.caption(f"Reference log-prob: {dpo['rejected_ref_lp']:.2f}")
+            # Worst
+            col1, col2, col3 = st.columns([2, 1, 1])
+            col1.markdown(f"🥉 **Worst** (Response {traces.index(rejected_trace) + 1})")
+            col2.metric("Reward", f"{dpo['rejected_reward']:.4f}", label_visibility="collapsed")
+            col3.caption(f"Policy: {dpo['rejected_policy_lp']:.1f} | Ref: {dpo['rejected_ref_lp']:.1f}")
 
             st.divider()
 
@@ -623,9 +623,10 @@ def main():
             st.markdown("### Group Relative Policy Optimization (GRPO)")
             st.markdown("*Analyzes all 3 responses together*")
 
-            col1, col2 = st.columns(2)
-            col1.metric("Group Mean Reward", f"{grpo['mean_reward']:.4f}")
-            col2.metric("Group Std Deviation", f"{grpo['std_reward']:.4f}")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Mean Reward", f"{grpo['mean_reward']:.4f}", help="Average reward across group")
+            col2.metric("Std Deviation", f"{grpo['std_reward']:.4f}", help="Spread of rewards")
+            col3.metric("Group Size", "3", help="Number of responses compared")
 
             st.divider()
 
