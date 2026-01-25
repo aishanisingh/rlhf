@@ -30,30 +30,30 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## how to use
+## Usage
 
-1. generate traces first:
+1. Generate traces first:
 ```bash
 python sampler.py
 ```
 
-2. run the ui:
+2. Run the UI:
 ```bash
 streamlit run streamlit_app.py
 ```
 
-3. pick a medical question, rank the 3 AI responses (best/middle/worst), hit compute
+3. Select a medical question, rank the 3 AI responses (best/middle/worst), and click compute
 
-you'll see DPO loss + margin, and GRPO advantages for each trace
+You'll see DPO loss + margin, and GRPO advantages for each trace.
 
-## config
+## Configuration
 
-edit `config.py` to change stuff:
+Edit `config.py` to change settings:
 
-- `beta` - how much to penalize diverging from reference (default 0.1)
-- `reward_best/middle/worst` - rewards for each rank (1.0, 0.5, 0.0)
-- `local_model_name` - which huggingface model to use
-- `backend` - can be `local_transformers`, `openai`, `vllm`, or `groq`
+- `beta` - KL penalty coefficient, controls how much the policy can diverge from reference (default 0.1)
+- `reward_best/middle/worst` - reward values assigned to each rank (1.0, 0.5, 0.0)
+- `local_model_name` - HuggingFace model to use for local inference
+- `backend` - model backend: `local_transformers`, `openai`, `vllm`, or `groq`
 
 ## the math
 
