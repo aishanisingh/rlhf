@@ -362,6 +362,7 @@ with gr.Blocks(title="TriFetch RLHF Workbench", theme=gr.themes.Soft()) as app:
     gr.Markdown("# TriFetch RLHF Workbench")
     gr.Markdown("rank ai responses to compute optimization signals")
 
+    gr.Markdown("<br>")
     sample_id = gr.State("")
 
     with gr.Row():
@@ -372,41 +373,64 @@ with gr.Blocks(title="TriFetch RLHF Workbench", theme=gr.themes.Soft()) as app:
         )
         load_btn = gr.Button("load", scale=1)
 
-    with gr.Row():
-        with gr.Column():
-            question_box = gr.Textbox(label="question", lines=6, interactive=False)
-            answer_box = gr.Textbox(label="correct answer", interactive=False)
+    gr.Markdown("<br>")
 
+    question_box = gr.Textbox(label="question", lines=8, interactive=False)
+
+    gr.Markdown("<br>")
+
+    answer_box = gr.Textbox(label="correct answer", interactive=False)
+
+    gr.Markdown("<br>")
     gr.Markdown("---")
+    gr.Markdown("<br>")
+
     gr.Markdown("### rank the responses")
     gr.Markdown("each response must have a unique rank: best, middle, or worst")
 
-    with gr.Row():
+    gr.Markdown("<br>")
+
+    with gr.Row(equal_height=True):
         with gr.Column():
-            trace1 = gr.Textbox(label="response 1", lines=8, interactive=False)
+            trace1 = gr.Textbox(label="response 1", lines=12, interactive=False)
+            gr.Markdown("<br>")
             rank1 = gr.Radio(["best", "middle", "worst"], label="rank for response 1")
         with gr.Column():
-            trace2 = gr.Textbox(label="response 2", lines=8, interactive=False)
+            trace2 = gr.Textbox(label="response 2", lines=12, interactive=False)
+            gr.Markdown("<br>")
             rank2 = gr.Radio(["best", "middle", "worst"], label="rank for response 2")
         with gr.Column():
-            trace3 = gr.Textbox(label="response 3", lines=8, interactive=False)
+            trace3 = gr.Textbox(label="response 3", lines=12, interactive=False)
+            gr.Markdown("<br>")
             rank3 = gr.Radio(["best", "middle", "worst"], label="rank for response 3")
 
-    compute_btn = gr.Button("compute optimization signals", variant="secondary", interactive=False)
+    gr.Markdown("<br>")
 
+    compute_btn = gr.Button("compute optimization signals", variant="secondary", interactive=False, size="lg")
+
+    gr.Markdown("<br>")
     gr.Markdown("---")
+    gr.Markdown("<br>")
+
     gr.Markdown("### results")
 
-    with gr.Row():
-        status = gr.Textbox(label="status", interactive=False)
+    gr.Markdown("<br>")
+
+    status = gr.Textbox(label="status", interactive=False)
+
+    gr.Markdown("<br>")
 
     with gr.Row():
         with gr.Column():
             gr.Markdown("**DPO** (direct preference optimization)")
-            dpo_output = gr.Textbox(label="", lines=8, interactive=False)
+            gr.Markdown("<br>")
+            dpo_output = gr.Textbox(label="", lines=10, interactive=False)
         with gr.Column():
             gr.Markdown("**GRPO** (group relative policy optimization)")
-            grpo_output = gr.Textbox(label="", lines=8, interactive=False)
+            gr.Markdown("<br>")
+            grpo_output = gr.Textbox(label="", lines=10, interactive=False)
+
+    gr.Markdown("<br>")
 
     # wire up events
     load_btn.click(
