@@ -30,52 +30,21 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Usage
+## how to use
 
-### Step 1: Generate Reasoning Traces
-
-Before using the UI, generate verified reasoning traces for each sample:
-
+1. generate traces first:
 ```bash
 python sampler.py
 ```
 
-This will:
-- Load medical QA samples from `sample[1-5].json`
-- Generate candidate reasoning traces using the model
-- Perform rejection sampling to keep only correct answers
-- Ensure traces are distinct (Jaccard distance > 0.3)
-- Cache results to `.trace_cache/` for resumption
-
-**Note**: The sampler supports optional rate limiting via `post_generation_sleep_seconds` config.
-
-### Step 2: Launch the Workbench UI
-
+2. run the ui:
 ```bash
-streamlit run app.py
+streamlit run streamlit_app.py
 ```
 
-This opens a web interface where you can:
-- Select a medical QA sample
-- View the question and ground truth answer
-- See three AI-generated reasoning traces
-- Rank the traces as Best, Middle, and Worst
-- Click "Update Model" to compute optimization signals
+3. pick a medical question, rank the 3 AI responses (best/middle/worst), hit compute
 
-### Step 3: Review Optimization Signals
-
-After ranking and clicking "Update Model", the UI displays:
-
-**DPO Results:**
-- DPO Loss value
-- Margin (rejected_reward - chosen_reward)
-- Implicit rewards for chosen and rejected traces
-- Policy and reference log-probabilities
-
-**GRPO Results:**
-- Per-trace advantages
-- Group mean and standard deviation
-- Optional safety bonuses for traces with escalation language
+you'll see DPO loss + margin, and GRPO advantages for each trace
 
 ## Configuration
 
