@@ -29,7 +29,7 @@ class ModelConfig:
     backend: ModelBackend = ModelBackend.LOCAL_TRANSFORMERS
 
     # Local model settings
-    local_model_name: str = "Qwen/Qwen2-1.5B-Instruct"  # Instruction-tuned model
+    local_model_name: str = "distilgpt2"  # Small and fast (~82MB)
     local_device: str = "auto"  # "cuda", "mps", "cpu", or "auto"
 
     # API settings (for vLLM, OpenAI, Groq)

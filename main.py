@@ -264,9 +264,6 @@ def main():
     # get config
     config = get_config()
 
-    # use a more capable model
-    config.model.local_model_name = "Qwen/Qwen2-1.5B-Instruct"
-
     # check for available samples
     samples = get_available_samples(".")
     if not samples:
