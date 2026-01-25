@@ -1,8 +1,31 @@
 """
 DPO and GRPO optimization logic for TriFetch RLHF Workbench.
 
-Computes optimization signals based on human preference rankings.
-Implements mathematically precise formulations with healthcare-aware extensions.
+This module implements two post-training preference optimization methods:
+
+1. DPO (Direct Preference Optimization)
+   - Replaces PPO-based RLHF with a simpler, more stable approach
+   - Derives implicit rewards from policy/reference log-prob ratios
+   - No separate reward model needed - the policy IS the reward model
+   - Based on the Bradley-Terry preference model
+
+2. GRPO (Group Relative Policy Optimization)
+   - Extends preference learning to groups of responses (not just pairs)
+   - Normalizes advantages relative to the group mean/std
+   - Better utilizes data when multiple candidates exist per prompt
+
+Healthcare-specific considerations:
+- We rank REASONING TRACES, not just final answers
+- All traces shown have correct answers (via rejection sampling)
+- This isolates reasoning quality from answer correctness
+- Optional safety shaping boosts traces with clinical escalation language
+  (e.g., "consult specialist", "emergency", "refer to")
+
+Post-training pipeline context:
+  Pretrain -> SFT (supervised fine-tuning) -> Preference Optimization (DPO/GRPO)
+
+This module computes the optimization signals (loss, margin, advantages) that would
+be used to update model weights. The math here is exactly what runs during training.
 """
 import math
 from dataclasses import dataclass, field
@@ -163,28 +186,41 @@ def compute_dpo_loss(
     """
     Compute Direct Preference Optimization (DPO) loss.
 
-    The DPO loss encourages the policy to prefer chosen over rejected completions
-    while staying close to the reference distribution.
+    DPO is a post-training method that learns from human preferences without
+    training a separate reward model. Key insight: we can derive an implicit
+    reward directly from the policy's log-probabilities.
+
+    Theory (Rafailov et al., 2023):
+    - The optimal policy under KL-constrained reward maximization has a closed form
+    - This lets us reparameterize the reward as: r(x,y) = beta * log(pi/pi_ref)
+    - We then optimize the Bradley-Terry preference model directly
 
     The implicit reward for a completion y given prompt x is:
-        r(x, y) = beta * (log pi_policy(y|x) - log pi_ref(y|x))
+        r(x, y) = log(pi_policy(y|x)) - log(pi_ref(y|x))
 
     The loss is: -log(sigmoid(beta * (r_chosen - r_rejected)))
 
-    This means:
-    - When chosen_reward > rejected_reward (good): loss is LOW
-    - When rejected_reward > chosen_reward (bad): loss is HIGH
+    Why DPO over PPO?
+    - Simpler: no reward model, no value function, no clipping heuristics
+    - Stable: direct optimization of preference objective
+    - Practical: fewer hyperparameters, easier to debug and interpret
+
+    Healthcare note:
+    - chosen_trace and rejected_trace both have CORRECT ANSWERS
+    - we're comparing REASONING QUALITY, not answer correctness
+    - this matters because a model that gets right answers for wrong reasons
+      will fail on edge cases where the shortcut doesn't apply
 
     Args:
-        prompt: The input prompt
-        chosen_trace: The trace ranked as Best
-        rejected_trace: The trace ranked as Worst
+        prompt: The input prompt (medical question)
+        chosen_trace: The trace ranked as Best (better reasoning)
+        rejected_trace: The trace ranked as Worst (worse reasoning)
         policy_model: Policy model with pretrained weights
-        reference_model: Reference model with random weights
-        config: DPO configuration
+        reference_model: Reference model (baseline for KL constraint)
+        config: DPO configuration (beta, log-prob mode, etc.)
 
     Returns:
-        DPOResult with loss, margin, and all intermediate values
+        DPOResult with loss, margin, implicit rewards, and log-probs
     """
     # Compute log-probs for both traces
     chosen_logprobs = compute_log_probs_for_trace(
@@ -244,14 +280,35 @@ def compute_grpo_advantages(
     """
     Compute Group Relative Policy Optimization (GRPO) advantages.
 
-    GRPO operates over the entire group of traces simultaneously,
-    computing group-relative advantages based on rankings.
+    GRPO extends preference optimization beyond pairwise comparisons.
+    Instead of just best-vs-worst, we consider all responses together
+    and compute advantages relative to the group.
 
-    Advantage = (reward - mean_reward) / (std_reward + eps)
+    Theory:
+    - Assign rewards based on rank: best=1.0, middle=0.5, worst=0.0
+    - Normalize to get advantages: (reward - mean) / std
+    - This is similar to advantage estimation in policy gradient methods
+    - The std normalization keeps gradient magnitudes consistent
+
+    Why group-relative?
+    - Uses more information than pairwise (DPO only uses best vs worst)
+    - The middle trace contributes to learning, not just extremes
+    - Variance reduction through normalization improves training stability
+
+    Healthcare-specific: Safety Shaping
+    - Optional bonus for traces containing clinical escalation language
+    - Keywords like "consult specialist", "emergency", "refer to"
+    - In medical AI, we WANT models that suggest escalation when uncertain
+    - This rewards clinically cautious reasoning
+
+    Advantage interpretation:
+    - Positive advantage: trace is better than group average -> reinforce
+    - Negative advantage: trace is worse than group average -> discourage
+    - The magnitude indicates how much better/worse
 
     Args:
         traces: List of all three ranked traces (Best, Middle, Worst)
-        config: GRPO configuration
+        config: GRPO configuration (rewards, safety shaping, etc.)
 
     Returns:
         GRPOResult with per-trace advantages and group statistics
@@ -281,7 +338,16 @@ def compute_grpo_advantages(
     for trace in traces:
         base_reward = rank_to_reward[trace.rank]
 
-        # Optional: Healthcare safety shaping
+        # Healthcare safety shaping:
+        # In medical AI, false negatives (missing a serious condition) are worse
+        # than false positives (unnecessary referral). We want models that err
+        # on the side of caution - suggesting specialist consultation, emergency
+        # care, or further testing when there's uncertainty.
+        #
+        # This bonus rewards traces that include clinical escalation language,
+        # even if their base reasoning rank is lower. A trace that says
+        # "this could be X, but consult cardiology to rule out Y" shows
+        # appropriate clinical caution.
         safety_bonus = 0.0
         if config.use_safety_shaping:
             trace_lower = trace.text.lower()
@@ -330,7 +396,25 @@ class Optimizer:
     """
     Main optimizer class that orchestrates DPO and GRPO computations.
 
-    Encapsulates model references and configuration for easy reuse.
+    This class computes the optimization signals that would be used in
+    post-training to align a model with human preferences. The signals
+    computed here are exactly what would flow through the backward pass
+    during actual training.
+
+    Design philosophy:
+    - Pragmatic: focuses on the math that matters (loss computation)
+    - Extensible: clean separation between DPO and GRPO
+    - Healthcare-aware: supports safety shaping for clinical contexts
+
+    In a full training loop, you would:
+    1. Compute these signals for a batch of samples
+    2. Backpropagate the DPO loss through the policy model
+    3. Update weights with your optimizer (AdamW, etc.)
+
+    We compute signals without training to:
+    - Demonstrate understanding of the underlying math
+    - Allow exploration without GPU requirements
+    - Focus on preference learning logic, not training infrastructure
     """
 
     def __init__(
@@ -342,10 +426,15 @@ class Optimizer:
         """
         Initialize optimizer with models and configuration.
 
+        The reference model is crucial for DPO - it provides the baseline
+        distribution that we compute KL divergence against. In standard DPO,
+        this is the SFT model (post supervised fine-tuning, pre preference
+        optimization). Here we use random weights to simulate this baseline.
+
         Args:
             policy_model: Policy model with pretrained weights
-            reference_model: Reference model with RANDOM weights (not pretrained)
-            config: Full configuration
+            reference_model: Reference model (baseline for KL constraint)
+            config: Full configuration including DPO and GRPO settings
         """
         self.policy_model = policy_model
         self.reference_model = reference_model
