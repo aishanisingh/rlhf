@@ -22,11 +22,11 @@ pipeline: pretrain -> sft -> dpo/grpo
 """
 import math
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict
 from enum import Enum
 
 from config import Config, DPOConfig, GRPOConfig, LogProbMode
-from model_interface import ModelInterface, LogProbResult
+from model_interface import ModelInterface
 
 
 class Rank(Enum):
