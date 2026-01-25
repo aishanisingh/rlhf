@@ -12,16 +12,16 @@ A pipeline for medical QA preference learning:
 
 The goal is to understand the math behind RLHF, not to train a model end-to-end.
 
-## files
+## Files
 
-- `config.py` - all the settings
-- `model_interface.py` - talks to different LLM backends
-- `sampler.py` - generates reasoning traces
-- `optimizer.py` - DPO and GRPO math
-- `streamlit_app.py` - the web ui
-- `sample[1-5].json` - medical questions
+- `config.py` - configuration and hyperparameters
+- `model_interface.py` - abstraction layer for different LLM backends
+- `sampler.py` - trace generation with rejection sampling
+- `optimizer.py` - DPO and GRPO computation logic
+- `streamlit_app.py` - web interface
+- `sample[1-5].json` - medical QA samples
 
-## setup
+## Setup
 
 ```bash
 cd TriFetch
