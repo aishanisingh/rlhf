@@ -1,8 +1,10 @@
 """
-TriFetch RLHF Workbench - Simple Local UI
+TriFetch RLHF Workbench - Streamlit UI
 """
-import gradio as gr
+import streamlit as st
 import math
+
+st.set_page_config(page_title="TriFetch RLHF Workbench", layout="wide")
 
 # ============== Data ==============
 
@@ -215,6 +217,7 @@ The answer is C."""}
     ]
 }
 
+
 # ============== Optimization Logic ==============
 
 def stable_log_sigmoid(x: float) -> float:
@@ -224,235 +227,209 @@ def stable_log_sigmoid(x: float) -> float:
         return x - math.log(1 + math.exp(x) + 1e-8)
 
 
-def compute_dpo(chosen_text: str, rejected_text: str, beta: float = 0.1):
-    def sim_logprob(text: str, is_policy: bool) -> float:
+def compute_dpo_signals(chosen_text: str, rejected_text: str, beta: float = 0.1):
+    def simulate_logprob(text: str, is_policy: bool) -> float:
         base = -2.0 * len(text.split())
         if is_policy:
             base += len(text.split()) * 0.1
         return base
 
-    chosen_policy = sim_logprob(chosen_text, True)
-    chosen_ref = sim_logprob(chosen_text, False)
-    rejected_policy = sim_logprob(rejected_text, True)
-    rejected_ref = sim_logprob(rejected_text, False)
+    chosen_policy_lp = simulate_logprob(chosen_text, True)
+    chosen_ref_lp = simulate_logprob(chosen_text, False)
+    rejected_policy_lp = simulate_logprob(rejected_text, True)
+    rejected_ref_lp = simulate_logprob(rejected_text, False)
 
-    chosen_reward = chosen_policy - chosen_ref
-    rejected_reward = rejected_policy - rejected_ref
+    chosen_reward = chosen_policy_lp - chosen_ref_lp
+    rejected_reward = rejected_policy_lp - rejected_ref_lp
     margin = chosen_reward - rejected_reward
     loss = -stable_log_sigmoid(beta * margin)
 
-    return loss, margin, chosen_reward, rejected_reward
+    return {
+        "loss": loss,
+        "margin": margin,
+        "chosen_reward": chosen_reward,
+        "rejected_reward": rejected_reward,
+    }
 
 
-def compute_grpo(rewards_dict):
-    vals = list(rewards_dict.values())
-    mean_r = sum(vals) / len(vals)
-    var = sum((r - mean_r) ** 2 for r in vals) / len(vals)
-    std_r = math.sqrt(var)
+def compute_grpo_signals(traces, rankings):
+    rank_rewards = {"Best": 1.0, "Middle": 0.5, "Worst": 0.0}
+
+    rewards = {}
+    for trace in traces:
+        tid = trace["id"]
+        rank = rankings.get(tid)
+        rewards[tid] = rank_rewards.get(rank, 0.0)
+
+    reward_vals = list(rewards.values())
+    mean_reward = sum(reward_vals) / len(reward_vals)
+    variance = sum((r - mean_reward) ** 2 for r in reward_vals) / len(reward_vals)
+    std_reward = math.sqrt(variance)
 
     advantages = {}
-    for k, r in rewards_dict.items():
-        advantages[k] = (r - mean_r) / (std_r + 1e-8)
+    for tid, reward in rewards.items():
+        advantages[tid] = (reward - mean_reward) / (std_reward + 1e-8)
 
-    return mean_r, std_r, advantages
+    return {
+        "rewards": rewards,
+        "advantages": advantages,
+        "mean_reward": mean_reward,
+        "std_reward": std_reward
+    }
 
 
-# ============== UI Logic ==============
+# ============== Main App ==============
 
-def get_sample_choices():
-    return [f"{k}: {v['topic']}" for k, v in SAMPLES.items()]
+def main():
+    st.title("TriFetch RLHF Workbench")
+    st.caption("rank ai responses to compute optimization signals")
 
+    st.markdown("")
 
-def load_sample(choice):
-    if not choice:
-        return "", "", "", "", "", "", None, None, None
-
-    sample_id = choice.split(":")[0]
-    sample = SAMPLES[sample_id]
-    traces = TRACES[sample_id]
-
-    return (
-        sample["question"],
-        sample["answer"],
-        traces[0]["text"],
-        traces[1]["text"],
-        traces[2]["text"],
-        sample_id,
-        None,  # reset rank1
-        None,  # reset rank2
-        None   # reset rank3
+    # case selection
+    selected_id = st.selectbox(
+        "select a medical case:",
+        list(SAMPLES.keys()),
+        format_func=lambda x: f"{x.replace('sample', 'case ')}: {SAMPLES[x]['topic']}"
     )
 
+    sample = SAMPLES[selected_id]
+    traces = TRACES[selected_id]
 
-def validate_ranks(rank1, rank2, rank3):
-    """Check if all ranks are assigned and unique."""
-    ranks = [rank1, rank2, rank3]
-    if None in ranks or "" in ranks:
-        return False
-    return sorted(ranks) == ["best", "middle", "worst"]
+    st.markdown("")
+    st.markdown("")
 
+    # question
+    st.subheader("question")
+    st.markdown(sample["question"])
 
-def compute_signals(sample_id, rank1, rank2, rank3):
-    if not sample_id:
-        return "select a sample first", "", ""
+    st.markdown("")
 
-    ranks = [rank1, rank2, rank3]
+    st.markdown(f"**correct answer: {sample['answer']}**")
 
-    # check all ranks are assigned
-    if None in ranks or "" in ranks:
-        return "assign a rank to each response first", "", ""
+    st.markdown("")
+    st.markdown("---")
+    st.markdown("")
 
-    # check all ranks are unique
-    if len(set(ranks)) != 3:
-        return "each response must have a different rank", "", ""
+    # ranking
+    st.subheader("rank the ai responses")
+    st.caption("all responses reach the correct answer. rank them by reasoning quality: best, middle, worst. each rank must be used exactly once.")
 
-    # check we have best, middle, worst
-    if sorted(ranks) != ["best", "middle", "worst"]:
-        return "use each rank exactly once: best, middle, worst", "", ""
+    st.markdown("")
 
-    traces = TRACES[sample_id]
+    if "rankings" not in st.session_state:
+        st.session_state.rankings = {}
+    if selected_id not in st.session_state.rankings:
+        st.session_state.rankings[selected_id] = {}
 
-    # find chosen and rejected
-    chosen_idx = ranks.index("best")
-    rejected_idx = ranks.index("worst")
+    cols = st.columns(3)
+    for i, (col, trace) in enumerate(zip(cols, traces)):
+        with col:
+            st.markdown(f"**response {i+1}** ({len(trace['text'].split())} words)")
 
-    chosen_text = traces[chosen_idx]["text"]
-    rejected_text = traces[rejected_idx]["text"]
+            st.markdown("")
 
-    # compute dpo
-    loss, margin, chosen_r, rejected_r = compute_dpo(chosen_text, rejected_text)
+            with st.container(border=True, height=350):
+                st.markdown(trace["text"])
 
-    dpo_result = f"""loss: {loss:.4f}
-margin: {margin:+.4f}
+            st.markdown("")
 
-chosen reward: {chosen_r:+.4f}
-rejected reward: {rejected_r:+.4f}
+            rank = st.selectbox(
+                f"rank for response {i+1}",
+                ["select rank", "Best", "Middle", "Worst"],
+                key=f"rank_{selected_id}_{trace['id']}",
+                label_visibility="collapsed"
+            )
+            if rank != "select rank":
+                st.session_state.rankings[selected_id][trace["id"]] = rank
 
-{"model agrees with your ranking" if margin > 0 else "model disagrees - training needed"}"""
+    st.markdown("")
+    st.markdown("")
 
-    # compute grpo
-    rank_to_reward = {"best": 1.0, "middle": 0.5, "worst": 0.0}
-    rewards = {f"response {i+1}": rank_to_reward[r] for i, r in enumerate(ranks)}
+    # validation
+    rankings = st.session_state.rankings[selected_id]
+    assigned = [r for r in rankings.values() if r and r != "select rank"]
+    valid = len(assigned) == 3 and set(assigned) == {"Best", "Middle", "Worst"}
 
-    mean_r, std_r, advantages = compute_grpo(rewards)
+    if assigned and not valid:
+        if len(assigned) < 3:
+            st.warning("please rank all three responses before computing.")
+        elif len(set(assigned)) != len(assigned):
+            st.warning("each rank must be unique. please assign best, middle, and worst to different responses.")
+        else:
+            st.warning("please use each rank exactly once: best, middle, worst.")
 
-    grpo_result = f"""mean reward: {mean_r:.2f}
-std reward: {std_r:.2f}
+    st.markdown("")
 
-advantages:"""
+    # compute
+    if st.button("compute optimization signals", type="primary", disabled=not valid):
+        chosen_trace = next(t for t in traces if rankings[t["id"]] == "Best")
+        rejected_trace = next(t for t in traces if rankings[t["id"]] == "Worst")
 
-    for i, r in enumerate(ranks):
-        adv = advantages[f"response {i+1}"]
-        grpo_result += f"\n  response {i+1} ({r}): {adv:+.4f}"
+        dpo = compute_dpo_signals(chosen_trace["text"], rejected_trace["text"])
+        grpo = compute_grpo_signals(traces, rankings)
 
-    return "computed!", dpo_result, grpo_result
+        st.markdown("")
+        st.markdown("---")
+        st.markdown("")
 
+        # results
+        st.subheader("results")
 
-def update_button_state(rank1, rank2, rank3):
-    """Enable compute button only when all ranks are valid."""
-    if validate_ranks(rank1, rank2, rank3):
-        return gr.update(interactive=True, variant="primary")
-    else:
-        return gr.update(interactive=False, variant="secondary")
+        st.markdown("")
 
+        tab1, tab2 = st.tabs(["DPO", "GRPO"])
 
-# ============== Build UI ==============
+        with tab1:
+            st.markdown("**direct preference optimization** - compares best vs worst")
 
-with gr.Blocks(title="TriFetch RLHF Workbench", theme=gr.themes.Soft()) as app:
-    gr.Markdown("# TriFetch RLHF Workbench")
-    gr.Markdown("rank ai responses to compute optimization signals")
+            st.markdown("")
 
-    gr.Markdown("<br>")
-    sample_id = gr.State("")
+            col1, col2 = st.columns(2)
+            col1.metric(
+                "loss",
+                f"{dpo['loss']:.4f}",
+                help="dpo loss measures how well the model aligns with your preference. lower loss means the model already prefers your best choice over worst."
+            )
+            col2.metric(
+                "margin",
+                f"{dpo['margin']:.4f}",
+                help="difference between the implicit rewards for best and worst responses. positive margin means the model assigns higher reward to your best choice."
+            )
 
-    with gr.Row():
-        sample_dropdown = gr.Dropdown(
-            choices=get_sample_choices(),
-            label="select a medical case",
-            scale=2
-        )
-        load_btn = gr.Button("load", scale=1)
+            st.markdown("")
 
-    gr.Markdown("<br>")
+            st.caption("positive margin = model prefers your best choice. negative = needs training.")
 
-    question_box = gr.Textbox(label="question", lines=8, interactive=False)
+        with tab2:
+            st.markdown("**group relative policy optimization** - compares all 3 responses")
 
-    gr.Markdown("<br>")
+            st.markdown("")
 
-    answer_box = gr.Textbox(label="correct answer", interactive=False)
+            col1, col2 = st.columns(2)
+            col1.metric(
+                "mean reward",
+                f"{grpo['mean_reward']:.2f}",
+                help="average reward across all three responses. used as the baseline for computing advantages."
+            )
+            col2.metric(
+                "std deviation",
+                f"{grpo['std_reward']:.2f}",
+                help="spread of rewards in the group. higher std means more differentiation between response qualities."
+            )
 
-    gr.Markdown("<br>")
-    gr.Markdown("---")
-    gr.Markdown("<br>")
+            st.markdown("")
 
-    gr.Markdown("### rank the responses")
-    gr.Markdown("each response must have a unique rank: best, middle, or worst")
+            st.markdown("**advantages:**")
+            for trace in traces:
+                rank = rankings[trace["id"]]
+                adv = grpo["advantages"][trace["id"]]
+                st.text(f"{rank}: {adv:+.4f}")
 
-    gr.Markdown("<br>")
+            st.markdown("")
 
-    with gr.Row(equal_height=True):
-        with gr.Column():
-            trace1 = gr.Textbox(label="response 1", lines=12, interactive=False)
-            gr.Markdown("<br>")
-            rank1 = gr.Radio(["best", "middle", "worst"], label="rank for response 1")
-        with gr.Column():
-            trace2 = gr.Textbox(label="response 2", lines=12, interactive=False)
-            gr.Markdown("<br>")
-            rank2 = gr.Radio(["best", "middle", "worst"], label="rank for response 2")
-        with gr.Column():
-            trace3 = gr.Textbox(label="response 3", lines=12, interactive=False)
-            gr.Markdown("<br>")
-            rank3 = gr.Radio(["best", "middle", "worst"], label="rank for response 3")
-
-    gr.Markdown("<br>")
-
-    compute_btn = gr.Button("compute optimization signals", variant="secondary", interactive=False, size="lg")
-
-    gr.Markdown("<br>")
-    gr.Markdown("---")
-    gr.Markdown("<br>")
-
-    gr.Markdown("### results")
-
-    gr.Markdown("<br>")
-
-    status = gr.Textbox(label="status", interactive=False)
-
-    gr.Markdown("<br>")
-
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("**DPO** (direct preference optimization)")
-            gr.Markdown("<br>")
-            dpo_output = gr.Textbox(label="", lines=10, interactive=False)
-        with gr.Column():
-            gr.Markdown("**GRPO** (group relative policy optimization)")
-            gr.Markdown("<br>")
-            grpo_output = gr.Textbox(label="", lines=10, interactive=False)
-
-    gr.Markdown("<br>")
-
-    # wire up events
-    load_btn.click(
-        load_sample,
-        inputs=[sample_dropdown],
-        outputs=[question_box, answer_box, trace1, trace2, trace3, sample_id, rank1, rank2, rank3]
-    )
-
-    # update button state when ranks change
-    for rank_input in [rank1, rank2, rank3]:
-        rank_input.change(
-            update_button_state,
-            inputs=[rank1, rank2, rank3],
-            outputs=[compute_btn]
-        )
-
-    compute_btn.click(
-        compute_signals,
-        inputs=[sample_id, rank1, rank2, rank3],
-        outputs=[status, dpo_output, grpo_output]
-    )
+            st.caption("advantages are normalized rewards: (reward - mean) / std. positive = above average, negative = below average.")
 
 
 if __name__ == "__main__":
-    app.launch()
+    main()

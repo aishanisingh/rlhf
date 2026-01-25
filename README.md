@@ -14,7 +14,7 @@ the goal is to understand the math behind rlhf, not to train a model end-to-end.
 
 ## files
 
-- `app.py` - local web ui (gradio)
+- `app.py` - local web ui (streamlit)
 - `main.py` - cli interface with real model log-probs
 - `config.py` - configuration and hyperparameters
 - `model_interface.py` - abstraction layer for different llm backends
@@ -36,10 +36,10 @@ pip install -r requirements.txt
 ### web ui (recommended)
 
 ```bash
-python app.py
+streamlit run app.py
 ```
 
-opens a local web interface at `http://127.0.0.1:7860` where you can:
+opens a local web interface at `http://localhost:8501` where you can:
 - select from 5 medical cases
 - view 3 ai-generated reasoning traces
 - rank each trace (best, middle, worst) - all three must be ranked with unique values

@@ -1,5 +1,5 @@
 # ui
-gradio>=4.0.0
+streamlit>=1.28.0
 
 # ml (for main.py cli with real models)
 torch>=2.0.0
