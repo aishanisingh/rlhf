@@ -46,44 +46,14 @@ streamlit run streamlit_app.py
 
 you'll see DPO loss + margin, and GRPO advantages for each trace
 
-## Configuration
+## config
 
-Configuration can be modified in `config.py` or via environment variables with `TRIFETCH_` prefix.
+edit `config.py` to change stuff:
 
-### Key Settings
-
-**DPO Configuration:**
-- `beta`: KL penalty coefficient (default: 0.1)
-- `use_length_scaling`: Enable token-length-aware beta scaling
-- `log_prob_mode`: `sum` or `length_normalized`
-
-**GRPO Configuration:**
-- `reward_best/middle/worst`: Rank-based rewards (default: 1.0, 0.5, 0.0)
-- `use_exponential_decay`: Alternative exponential reward decay
-- `use_safety_shaping`: Boost traces with healthcare escalation language
-
-**Model Configuration:**
-- `local_model_name`: HuggingFace model ID (default: `distilgpt2`)
-- `backend`: `local_transformers`, `openai`, `vllm`, or `groq`
-
-### Switching Model Backends
-
-To use an OpenAI-compatible API:
-
-```python
-# In config.py or via environment
-config.model.backend = ModelBackend.OPENAI
-config.model.api_base_url = "https://api.openai.com/v1"
-config.model.api_key = "your-api-key"
-config.model.api_model_name = "gpt-3.5-turbo-instruct"
-```
-
-For vLLM serving:
-
-```python
-config.model.backend = ModelBackend.VLLM
-config.model.api_base_url = "http://localhost:8000/v1"
-```
+- `beta` - how much to penalize diverging from reference (default 0.1)
+- `reward_best/middle/worst` - rewards for each rank (1.0, 0.5, 0.0)
+- `local_model_name` - which huggingface model to use
+- `backend` - can be `local_transformers`, `openai`, `vllm`, or `groq`
 
 ## Technical Details
 
