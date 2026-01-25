@@ -55,43 +55,11 @@ edit `config.py` to change stuff:
 - `local_model_name` - which huggingface model to use
 - `backend` - can be `local_transformers`, `openai`, `vllm`, or `groq`
 
-## Technical Details
+## the math
 
-### DPO Implementation
+**DPO**: `loss = -log(sigmoid(beta * margin))` where margin is how much the model prefers the chosen trace over rejected
 
-The DPO loss is computed as:
-
-```
-loss = -log(sigmoid(beta * margin))
-```
-
-Where:
-- `margin = chosen_reward - rejected_reward` (standard DPO formulation)
-- `reward = policy_log_prob - reference_log_prob`
-- Reference model uses **pretrained weights** (same as initial policy, standard DPO)
-
-The loss is low when the model correctly prefers the chosen trace, and high otherwise.
-
-### GRPO Implementation
-
-Group advantages are computed as:
-
-```
-advantage_i = (reward_i - mean_reward) / (std_reward + eps)
-```
-
-With optional healthcare safety shaping that boosts traces containing clinical escalation language (e.g., "consult", "emergency", "urgent").
-
-### Log-Probability Computation
-
-Log-probs are computed token-by-token over the completion only, conditioned on the full prompt and previous tokens. Both sum and length-normalized modes are supported, with caching to avoid recomputation.
-
-### Distinctness Enforcement
-
-Traces must be sufficiently distinct beyond trivial string differences:
-- Normalized text hash collision detection
-- Token-level Jaccard distance (minimum 0.3)
-- Optional embedding-based semantic separation
+**GRPO**: `advantage = (reward - mean) / std` - normalizes rewards relative to the group
 
 ## Data Format
 
