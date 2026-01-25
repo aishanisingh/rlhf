@@ -2,8 +2,6 @@
 TriFetch RLHF Workbench - Simple Local UI
 """
 import gradio as gr
-import json
-import os
 import math
 
 # ============== Data ==============
@@ -39,6 +37,27 @@ D) Chromosome X""",
         "answer": "C",
         "topic": "Genetics - Friedreich's Ataxia"
     },
+    "sample4": {
+        "question": """A 25-year-old male presents with high-grade fever and hypotension. Laboratory results show hemoglobin 5 g/dL, total leukocyte count 9000/mm3, and a differential count of 2% polymorphs, 96% lymphocytes, and 2% eosinophils. Which of the following treatment options should be avoided in this clinical scenario?
+
+A) Intravenous fluid resuscitation
+B) Packed red blood cell transfusion
+C) Oral ciprofloxacin
+D) Intravenous broad-spectrum antibiotics""",
+        "answer": "C",
+        "topic": "Hematology - Febrile Neutropenia"
+    },
+    "sample5": {
+        "question": """A 32-year-old man presents with a severe headache in the left forehead and eye that wakes him from sleep. He has a history of a recent sinus infection and type 1 diabetes. Imaging reveals thrombosis of a sinus located above the sella turcica. Which of the following findings would most likely also be seen in this patient?
+
+A) Anosmia
+B) Mandibular pain
+C) Ophthalmoplegia
+D) Vertigo
+E) Vision loss""",
+        "answer": "C",
+        "topic": "Neurology - Cavernous Sinus Thrombosis"
+    }
 }
 
 TRACES = {
@@ -122,6 +141,78 @@ The answer is C."""},
 
 The answer is C."""}
     ],
+    "sample4": [
+        {"id": "trace_0", "text": """This is a critically ill patient with fever, hypotension, and severely abnormal labs. Let me analyze systematically.
+
+Key findings:
+- Severe anemia: Hb 5 g/dL (critical)
+- Abnormal differential: 2% neutrophils (profound neutropenia), 96% lymphocytes
+- Signs of sepsis/shock: fever, hypotension
+
+The differential with only 2% polymorphs indicates severe neutropenia. Combined with fever and hypotension, this is febrile neutropenia with septic shock - a medical emergency.
+
+Management priorities:
+- IV fluid resuscitation: Essential for shock - should be given
+- Packed RBC transfusion: Critical for Hb of 5 - should be given
+- IV broad-spectrum antibiotics: Standard of care for febrile neutropenia - should be given
+
+What should be AVOIDED?
+- Oral ciprofloxacin: In septic shock, GI absorption is unreliable due to poor perfusion. IV antibiotics are mandatory.
+
+The answer is C."""},
+        {"id": "trace_1", "text": """This patient has febrile neutropenia (2% polymorphs) with signs of septic shock.
+
+The treatment needs to be aggressive:
+- Fluids for hypotension - yes
+- Blood transfusion for severe anemia - yes
+- Antibiotics - yes, but must be IV
+
+Oral ciprofloxacin would be inappropriate because:
+1. The patient is in shock with unreliable GI absorption
+2. Febrile neutropenia requires IV antibiotics
+3. Oral medications are too slow-acting for this emergency
+
+The answer is C."""},
+        {"id": "trace_2", "text": """The patient has low neutrophils and signs of infection with shock.
+
+You can't give oral antibiotics to someone in septic shock. They need IV antibiotics.
+
+The answer is C."""}
+    ],
+    "sample5": [
+        {"id": "trace_0", "text": """This case requires careful neuroanatomical reasoning. Let me analyze the key features.
+
+Clinical presentation:
+- Severe headache in left forehead and eye, waking from sleep
+- History of recent sinus infection
+- Type 1 diabetes (increases infection risk)
+- Imaging shows sinus thrombosis ABOVE the sella turcica
+
+The location "above the sella turcica" is critical - this describes the cavernous sinus. Cavernous sinus thrombosis (CST) is a serious complication of facial/sinus infections.
+
+Structures within the cavernous sinus:
+- CN III (oculomotor)
+- CN IV (trochlear)
+- CN VI (abducens)
+- CN V1 and V2 (trigeminal branches)
+- Internal carotid artery
+
+When these cranial nerves are affected by inflammation/thrombosis, the result is ophthalmoplegia - inability to move the eye properly.
+
+The answer is C."""},
+        {"id": "trace_1", "text": """The imaging shows thrombosis above the sella turcica - this is the cavernous sinus.
+
+The cavernous sinus contains cranial nerves III, IV, VI (eye movement) and branches of V.
+
+With cavernous sinus thrombosis, these nerves get compressed, causing ophthalmoplegia (paralysis of eye movements).
+
+The olfactory nerve and vestibular system are not involved. The optic nerve runs separately.
+
+The answer is C."""},
+        {"id": "trace_2", "text": """Thrombosis above sella turcica means cavernous sinus problem. Eye movement nerves are in the cavernous sinus.
+
+The answer is C."""}
+    ]
 }
 
 # ============== Optimization Logic ==============
@@ -173,6 +264,9 @@ def get_sample_choices():
 
 
 def load_sample(choice):
+    if not choice:
+        return "", "", "", "", "", "", None, None, None
+
     sample_id = choice.split(":")[0]
     sample = SAMPLES[sample_id]
     traces = TRACES[sample_id]
@@ -183,8 +277,19 @@ def load_sample(choice):
         traces[0]["text"],
         traces[1]["text"],
         traces[2]["text"],
-        sample_id
+        sample_id,
+        None,  # reset rank1
+        None,  # reset rank2
+        None   # reset rank3
     )
+
+
+def validate_ranks(rank1, rank2, rank3):
+    """Check if all ranks are assigned and unique."""
+    ranks = [rank1, rank2, rank3]
+    if None in ranks or "" in ranks:
+        return False
+    return sorted(ranks) == ["best", "middle", "worst"]
 
 
 def compute_signals(sample_id, rank1, rank2, rank3):
@@ -192,8 +297,18 @@ def compute_signals(sample_id, rank1, rank2, rank3):
         return "select a sample first", "", ""
 
     ranks = [rank1, rank2, rank3]
+
+    # check all ranks are assigned
+    if None in ranks or "" in ranks:
+        return "assign a rank to each response first", "", ""
+
+    # check all ranks are unique
+    if len(set(ranks)) != 3:
+        return "each response must have a different rank", "", ""
+
+    # check we have best, middle, worst
     if sorted(ranks) != ["best", "middle", "worst"]:
-        return "assign each rank exactly once (best, middle, worst)", "", ""
+        return "use each rank exactly once: best, middle, worst", "", ""
 
     traces = TRACES[sample_id]
 
@@ -233,6 +348,14 @@ advantages:"""
     return "computed!", dpo_result, grpo_result
 
 
+def update_button_state(rank1, rank2, rank3):
+    """Enable compute button only when all ranks are valid."""
+    if validate_ranks(rank1, rank2, rank3):
+        return gr.update(interactive=True, variant="primary")
+    else:
+        return gr.update(interactive=False, variant="secondary")
+
+
 # ============== Build UI ==============
 
 with gr.Blocks(title="TriFetch RLHF Workbench", theme=gr.themes.Soft()) as app:
@@ -255,20 +378,21 @@ with gr.Blocks(title="TriFetch RLHF Workbench", theme=gr.themes.Soft()) as app:
             answer_box = gr.Textbox(label="correct answer", interactive=False)
 
     gr.Markdown("---")
-    gr.Markdown("### rank the responses (best, middle, worst)")
+    gr.Markdown("### rank the responses")
+    gr.Markdown("each response must have a unique rank: best, middle, or worst")
 
     with gr.Row():
         with gr.Column():
             trace1 = gr.Textbox(label="response 1", lines=8, interactive=False)
-            rank1 = gr.Radio(["best", "middle", "worst"], label="rank")
+            rank1 = gr.Radio(["best", "middle", "worst"], label="rank for response 1")
         with gr.Column():
             trace2 = gr.Textbox(label="response 2", lines=8, interactive=False)
-            rank2 = gr.Radio(["best", "middle", "worst"], label="rank")
+            rank2 = gr.Radio(["best", "middle", "worst"], label="rank for response 2")
         with gr.Column():
             trace3 = gr.Textbox(label="response 3", lines=8, interactive=False)
-            rank3 = gr.Radio(["best", "middle", "worst"], label="rank")
+            rank3 = gr.Radio(["best", "middle", "worst"], label="rank for response 3")
 
-    compute_btn = gr.Button("compute optimization signals", variant="primary")
+    compute_btn = gr.Button("compute optimization signals", variant="secondary", interactive=False)
 
     gr.Markdown("---")
     gr.Markdown("### results")
@@ -288,8 +412,16 @@ with gr.Blocks(title="TriFetch RLHF Workbench", theme=gr.themes.Soft()) as app:
     load_btn.click(
         load_sample,
         inputs=[sample_dropdown],
-        outputs=[question_box, answer_box, trace1, trace2, trace3, sample_id]
+        outputs=[question_box, answer_box, trace1, trace2, trace3, sample_id, rank1, rank2, rank3]
     )
+
+    # update button state when ranks change
+    for rank_input in [rank1, rank2, rank3]:
+        rank_input.change(
+            update_button_state,
+            inputs=[rank1, rank2, rank3],
+            outputs=[compute_btn]
+        )
 
     compute_btn.click(
         compute_signals,

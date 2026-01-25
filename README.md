@@ -14,11 +14,12 @@ the goal is to understand the math behind rlhf, not to train a model end-to-end.
 
 ## files
 
+- `app.py` - local web ui (gradio)
+- `main.py` - cli interface with real model log-probs
 - `config.py` - configuration and hyperparameters
 - `model_interface.py` - abstraction layer for different llm backends
 - `sampler.py` - trace generation with rejection sampling
 - `optimizer.py` - dpo and grpo computation logic
-- `main.py` - local cli interface
 - `sample[1-5].json` - medical qa samples
 
 ## setup
@@ -32,40 +33,34 @@ pip install -r requirements.txt
 
 ## usage
 
-1. generate traces first (if not already cached):
+### web ui (recommended)
+
 ```bash
-python sampler.py
+python app.py
 ```
 
-2. run the local cli:
+opens a local web interface at `http://127.0.0.1:7860` where you can:
+- select from 5 medical cases
+- view 3 ai-generated reasoning traces
+- rank each trace (best, middle, worst) - all three must be ranked with unique values
+- compute dpo and grpo optimization signals
+
+### cli with real models
+
 ```bash
 python main.py
 ```
 
-the cli will:
-- load the policy model (Qwen2-1.5B-Instruct by default)
-- load a reference model with random weights
-- let you select a medical question
-- show 3 ai-generated reasoning traces
-- let you rank them (best/middle/worst)
-- compute real dpo and grpo signals using actual log-probabilities
+uses actual model log-probabilities instead of simulated values. requires more memory and time but gives real optimization signals.
 
 ## configuration
 
 edit `config.py` to change settings:
 
-- `local_model_name` - huggingface model to use (default: `Qwen/Qwen2-1.5B-Instruct`)
+- `local_model_name` - huggingface model to use (default: `distilgpt2`)
 - `beta` - kl penalty coefficient, controls how much the policy can diverge from reference (default 0.1)
 - `reward_best/middle/worst` - reward values assigned to each rank (1.0, 0.5, 0.0)
 - `backend` - model backend: `local_transformers`, `openai`, `vllm`, or `groq`
-
-for api backends, set environment variables:
-```bash
-export GROQ_API_KEY="your-key"  # auto-configures groq backend
-# or
-export TRIFETCH_API_KEY="your-key"
-export TRIFETCH_API_BASE_URL="https://api.openai.com/v1"
-```
 
 ## optimization math
 
@@ -123,6 +118,6 @@ sample json files should have this structure:
 
 ## troubleshooting
 
-- **"no samples with cached traces found"** - run `python sampler.py` first to generate traces
-- **out of memory** - use a smaller model in config.py (e.g., `Qwen/Qwen2-0.5B-Instruct`)
+- **"no samples with cached traces found"** (cli only) - run `python sampler.py` first to generate traces
+- **out of memory** - use a smaller model in config.py (e.g., `distilgpt2`)
 - **slow log-prob computation** - results are cached in `.logprob_cache_*.json` files, subsequent runs will be faster
