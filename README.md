@@ -21,29 +21,13 @@ the goal is to understand the math behind rlhf, not to actually train a model en
 - `streamlit_app.py` - the web ui
 - `sample[1-5].json` - medical questions
 
-## Installation
-
-### Local Setup
+## setup
 
 ```bash
-# Clone or navigate to the project directory
 cd TriFetch
-
-# Create virtual environment (recommended)
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
+source venv/bin/activate
 pip install -r requirements.txt
-```
-
-### Google Colab
-
-```python
-!pip install torch transformers streamlit openai
-
-# Upload the project files or clone from repository
-# Then run the sampler and app
 ```
 
 ## Usage
