@@ -12,19 +12,14 @@ basically a pipeline for medical QA:
 
 the goal is to understand the math behind rlhf, not to actually train a model end-to-end.
 
-## Project Structure
+## files
 
-```
-TriFetch/
-├── config.py           # Configuration management
-├── model_interface.py  # Model-agnostic abstraction layer
-├── sampler.py          # Trace generation and rejection sampling
-├── optimizer.py        # DPO and GRPO optimization logic
-├── app.py              # Streamlit UI
-├── requirements.txt    # Python dependencies
-├── sample[1-5].json    # Medical QA datasets
-└── README.md           # This file
-```
+- `config.py` - all the settings
+- `model_interface.py` - talks to different LLM backends
+- `sampler.py` - generates reasoning traces
+- `optimizer.py` - DPO and GRPO math
+- `streamlit_app.py` - the web ui
+- `sample[1-5].json` - medical questions
 
 ## Installation
 
