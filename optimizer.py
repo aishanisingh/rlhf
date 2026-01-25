@@ -1,31 +1,24 @@
 """
-DPO and GRPO optimization logic for TriFetch RLHF Workbench.
+dpo and grpo optimization logic for trifetch.
 
-This module implements two post-training preference optimization methods:
+two post-training methods for learning from human preferences:
 
-1. DPO (Direct Preference Optimization)
-   - Replaces PPO-based RLHF with a simpler, more stable approach
-   - Derives implicit rewards from policy/reference log-prob ratios
-   - No separate reward model needed - the policy IS the reward model
-   - Based on the Bradley-Terry preference model
+dpo (direct preference optimization):
+  - skips the reward model - derives rewards from log-prob ratios
+  - loss = -log(sigmoid(beta * (r_chosen - r_rejected)))
+  - simpler than ppo: no value function, no clipping, fewer hyperparameters
 
-2. GRPO (Group Relative Policy Optimization)
-   - Extends preference learning to groups of responses (not just pairs)
-   - Normalizes advantages relative to the group mean/std
-   - Better utilizes data when multiple candidates exist per prompt
+grpo (group relative policy optimization):
+  - works with groups of responses, not just pairs
+  - advantage = (reward - mean) / std
+  - uses all responses, not just best vs worst
 
-Healthcare-specific considerations:
-- We rank REASONING TRACES, not just final answers
-- All traces shown have correct answers (via rejection sampling)
-- This isolates reasoning quality from answer correctness
-- Optional safety shaping boosts traces with clinical escalation language
-  (e.g., "consult specialist", "emergency", "refer to")
+healthcare context:
+  - we rank reasoning quality, not answer correctness
+  - all traces have correct answers (rejection sampling)
+  - optional safety bonus for clinical escalation language
 
-Post-training pipeline context:
-  Pretrain -> SFT (supervised fine-tuning) -> Preference Optimization (DPO/GRPO)
-
-This module computes the optimization signals (loss, margin, advantages) that would
-be used to update model weights. The math here is exactly what runs during training.
+pipeline: pretrain -> sft -> dpo/grpo
 """
 import math
 from dataclasses import dataclass, field
@@ -37,7 +30,7 @@ from model_interface import ModelInterface, LogProbResult
 
 
 class Rank(Enum):
-    """Trace ranking from human feedback."""
+    """trace ranking from human feedback."""
     BEST = "best"
     MIDDLE = "middle"
     WORST = "worst"
@@ -45,7 +38,7 @@ class Rank(Enum):
 
 @dataclass
 class RankedTrace:
-    """A trace with its human-assigned rank."""
+    """a trace with its human-assigned rank."""
     trace_id: str
     text: str
     rank: Rank
@@ -53,7 +46,7 @@ class RankedTrace:
 
 @dataclass
 class LogProbPair:
-    """Log-probabilities under policy and reference models."""
+    """log-probs under policy and reference models."""
     policy_sum: float
     policy_mean: float
     policy_num_tokens: int
@@ -62,13 +55,11 @@ class LogProbPair:
     reference_num_tokens: int
 
     def get_policy_logprob(self, mode: LogProbMode) -> float:
-        """Get policy log-prob based on mode."""
         if mode == LogProbMode.SUM:
             return self.policy_sum
         return self.policy_mean
 
     def get_reference_logprob(self, mode: LogProbMode) -> float:
-        """Get reference log-prob based on mode."""
         if mode == LogProbMode.SUM:
             return self.reference_sum
         return self.reference_mean
@@ -76,62 +67,47 @@ class LogProbPair:
 
 @dataclass
 class DPOResult:
-    """Result of DPO computation."""
-    # Core DPO outputs
+    """dpo computation output."""
     loss: float
-    margin: float  # rejected_reward - chosen_reward (inverted per spec)
+    margin: float  # chosen_reward - rejected_reward
 
-    # Implicit rewards
-    chosen_reward: float  # policy_logprob - ref_logprob for best trace
-    rejected_reward: float  # policy_logprob - ref_logprob for worst trace
+    # implicit rewards: log(pi) - log(pi_ref)
+    chosen_reward: float
+    rejected_reward: float
 
-    # Log-probabilities
+    # raw log-probs
     chosen_logprobs: LogProbPair
     rejected_logprobs: LogProbPair
 
-    # Configuration used
+    # config
     beta: float
-    effective_beta: float  # After any length scaling
+    effective_beta: float
     log_prob_mode: LogProbMode
 
-    # Metadata
+    # metadata
     chosen_trace_id: str
     rejected_trace_id: str
 
 
 @dataclass
 class GRPOResult:
-    """Result of GRPO computation."""
-    # Per-trace advantages
+    """grpo computation output."""
     advantages: Dict[str, float]  # trace_id -> advantage
-
-    # Per-trace rewards (before normalization)
     rewards: Dict[str, float]  # trace_id -> reward
-
-    # Group statistics
     mean_reward: float
     std_reward: float
-
-    # Optional: safety-shaped rewards
     safety_bonuses: Dict[str, float] = field(default_factory=dict)
-
-    # Configuration used
     log_prob_mode: LogProbMode = LogProbMode.SUM
-
-    # Metadata
     trace_ids: List[str] = field(default_factory=list)
 
 
 def stable_log_sigmoid(x: float, eps: float = 1e-8) -> float:
     """
-    Numerically stable computation of log(sigmoid(x)).
+    numerically stable log(sigmoid(x)).
 
-    log(sigmoid(x)) = log(1 / (1 + exp(-x)))
-                    = -log(1 + exp(-x))
+    log(sigmoid(x)) = -log(1 + exp(-x))
 
-    For numerical stability:
-    - When x >= 0: -log(1 + exp(-x)) directly
-    - When x < 0: x - log(1 + exp(x)) to avoid overflow
+    but for x < 0, we rewrite as x - log(1 + exp(x)) to avoid overflow.
     """
     if x >= 0:
         return -math.log(1 + math.exp(-x) + eps)
@@ -146,23 +122,8 @@ def compute_log_probs_for_trace(
     reference_model: ModelInterface,
     mode: LogProbMode = LogProbMode.SUM
 ) -> LogProbPair:
-    """
-    Compute log-probabilities for a trace under both policy and reference models.
-
-    Args:
-        prompt: The input prompt (question)
-        trace_text: The reasoning trace text
-        policy_model: The policy model (pretrained weights)
-        reference_model: The reference model (random weights)
-        mode: Whether to use sum or length-normalized log-probs
-
-    Returns:
-        LogProbPair with both policy and reference log-probs
-    """
-    # Compute policy log-prob
+    """get log-probs for a trace under both models."""
     policy_result = policy_model.compute_log_prob(prompt, trace_text, mode)
-
-    # Compute reference log-prob
     reference_result = reference_model.compute_log_prob(prompt, trace_text, mode)
 
     return LogProbPair(
@@ -184,45 +145,41 @@ def compute_dpo_loss(
     config: DPOConfig
 ) -> DPOResult:
     """
-    Compute Direct Preference Optimization (DPO) loss.
+    compute dpo loss for a preference pair.
 
-    DPO is a post-training method that learns from human preferences without
-    training a separate reward model. Key insight: we can derive an implicit
-    reward directly from the policy's log-probabilities.
+    the key insight of dpo (rafailov et al. 2023):
+      instead of training a reward model then doing rl,
+      we can optimize preferences directly using log-prob ratios.
 
-    Theory (Rafailov et al., 2023):
-    - The optimal policy under KL-constrained reward maximization has a closed form
-    - This lets us reparameterize the reward as: r(x,y) = beta * log(pi/pi_ref)
-    - We then optimize the Bradley-Terry preference model directly
+    implicit reward:
+      r(x, y) = log(pi_policy(y|x)) - log(pi_ref(y|x))
 
-    The implicit reward for a completion y given prompt x is:
-        r(x, y) = log(pi_policy(y|x)) - log(pi_ref(y|x))
+      this measures how much the policy prefers y compared to the reference.
+      if policy likes it more than reference does, reward is positive.
 
-    The loss is: -log(sigmoid(beta * (r_chosen - r_rejected)))
+    loss:
+      loss = -log(sigmoid(beta * margin))
+      margin = r_chosen - r_rejected
 
-    Why DPO over PPO?
-    - Simpler: no reward model, no value function, no clipping heuristics
-    - Stable: direct optimization of preference objective
-    - Practical: fewer hyperparameters, easier to debug and interpret
+      when margin > 0: policy prefers chosen -> low loss (good)
+      when margin < 0: policy prefers rejected -> high loss (needs training)
 
-    Healthcare note:
-    - chosen_trace and rejected_trace both have CORRECT ANSWERS
-    - we're comparing REASONING QUALITY, not answer correctness
-    - this matters because a model that gets right answers for wrong reasons
-      will fail on edge cases where the shortcut doesn't apply
+    beta controls how sharp the preference learning is.
+    higher beta = more aggressive preference updates.
 
-    Args:
-        prompt: The input prompt (medical question)
-        chosen_trace: The trace ranked as Best (better reasoning)
-        rejected_trace: The trace ranked as Worst (worse reasoning)
-        policy_model: Policy model with pretrained weights
-        reference_model: Reference model (baseline for KL constraint)
-        config: DPO configuration (beta, log-prob mode, etc.)
+    why dpo over ppo:
+      - no reward model to train
+      - no value function to estimate
+      - no clipping heuristics
+      - direct optimization of bradley-terry preference model
+      - more stable, fewer hyperparameters
 
-    Returns:
-        DPOResult with loss, margin, implicit rewards, and log-probs
+    healthcare note:
+      both traces have correct answers (we used rejection sampling).
+      we're comparing reasoning quality, not correctness.
+      a model that gets right answers for wrong reasons will fail on edge cases.
     """
-    # Compute log-probs for both traces
+    # get log-probs for both traces
     chosen_logprobs = compute_log_probs_for_trace(
         prompt, chosen_trace.text, policy_model, reference_model, config.log_prob_mode
     )
@@ -230,10 +187,9 @@ def compute_dpo_loss(
         prompt, rejected_trace.text, policy_model, reference_model, config.log_prob_mode
     )
 
-    # Get log-probs based on configured mode
     mode = config.log_prob_mode
 
-    # Compute implicit rewards: r(x,y) = log(pi(y|x)) - log(pi_ref(y|x))
+    # implicit rewards: r = log(pi) - log(pi_ref)
     chosen_policy_lp = chosen_logprobs.get_policy_logprob(mode)
     chosen_ref_lp = chosen_logprobs.get_reference_logprob(mode)
     chosen_reward = chosen_policy_lp - chosen_ref_lp
@@ -242,20 +198,17 @@ def compute_dpo_loss(
     rejected_ref_lp = rejected_logprobs.get_reference_logprob(mode)
     rejected_reward = rejected_policy_lp - rejected_ref_lp
 
-    # Compute effective beta (with optional length scaling)
+    # optional length scaling for beta
     effective_beta = config.beta
     if config.use_length_scaling:
-        # Scale beta based on average token length of traces
         avg_tokens = (chosen_logprobs.policy_num_tokens + rejected_logprobs.policy_num_tokens) / 2
         effective_beta = config.beta + config.length_scaling_factor * avg_tokens
 
-    # Standard DPO margin: chosen_reward - rejected_reward
-    # This rewards positive margins (when chosen is preferred)
+    # margin: how much more the policy rewards chosen over rejected
     margin = chosen_reward - rejected_reward
 
-    # DPO loss: -log(sigmoid(beta * margin))
-    # Loss is LOW when chosen_reward > rejected_reward (correct preference)
-    # Loss is HIGH when chosen_reward < rejected_reward (incorrect preference)
+    # dpo loss: -log(sigmoid(beta * margin))
+    # low when margin > 0 (correct preference), high when margin < 0
     loss = -stable_log_sigmoid(effective_beta * margin, config.eps)
 
     return DPOResult(
@@ -278,52 +231,42 @@ def compute_grpo_advantages(
     config: GRPOConfig
 ) -> GRPOResult:
     """
-    Compute Group Relative Policy Optimization (GRPO) advantages.
+    compute grpo advantages for a group of traces.
 
-    GRPO extends preference optimization beyond pairwise comparisons.
-    Instead of just best-vs-worst, we consider all responses together
-    and compute advantages relative to the group.
+    grpo extends preference learning to groups (not just pairs).
 
-    Theory:
-    - Assign rewards based on rank: best=1.0, middle=0.5, worst=0.0
-    - Normalize to get advantages: (reward - mean) / std
-    - This is similar to advantage estimation in policy gradient methods
-    - The std normalization keeps gradient magnitudes consistent
+    how it works:
+      1. assign rewards based on rank: best=1.0, middle=0.5, worst=0.0
+      2. normalize: advantage = (reward - mean) / std
+      3. use advantages to weight policy gradient updates
 
-    Why group-relative?
-    - Uses more information than pairwise (DPO only uses best vs worst)
-    - The middle trace contributes to learning, not just extremes
-    - Variance reduction through normalization improves training stability
+    why group-relative:
+      - dpo only uses best vs worst, ignoring middle
+      - grpo uses all responses, more data-efficient
+      - std normalization keeps gradients stable across batches
 
-    Healthcare-specific: Safety Shaping
-    - Optional bonus for traces containing clinical escalation language
-    - Keywords like "consult specialist", "emergency", "refer to"
-    - In medical AI, we WANT models that suggest escalation when uncertain
-    - This rewards clinically cautious reasoning
+    the advantage tells you:
+      positive -> better than average, reinforce this behavior
+      negative -> worse than average, discourage this behavior
+      magnitude -> how strongly to update
 
-    Advantage interpretation:
-    - Positive advantage: trace is better than group average -> reinforce
-    - Negative advantage: trace is worse than group average -> discourage
-    - The magnitude indicates how much better/worse
-
-    Args:
-        traces: List of all three ranked traces (Best, Middle, Worst)
-        config: GRPO configuration (rewards, safety shaping, etc.)
-
-    Returns:
-        GRPOResult with per-trace advantages and group statistics
+    safety shaping (optional):
+      in healthcare, false negatives are worse than false positives.
+      we want models that suggest "consult a specialist" when uncertain.
+      safety bonus rewards traces with escalation language like
+      "emergency", "refer to", "consult", "urgent".
     """
     if len(traces) != 3:
-        raise ValueError(f"GRPO requires exactly 3 traces, got {len(traces)}")
+        raise ValueError(f"grpo requires exactly 3 traces, got {len(traces)}")
 
-    # Assign rewards based on rank
+    # base rewards from ranks
     rank_to_reward = {
         Rank.BEST: config.reward_best,
         Rank.MIDDLE: config.reward_middle,
         Rank.WORST: config.reward_worst
     }
 
-    # Optional: Use exponential decay rewards
+    # optional exponential decay: best=1, middle=decay, worst=decay^2
     if config.use_exponential_decay:
         rank_to_reward = {
             Rank.BEST: 1.0,
@@ -331,23 +274,14 @@ def compute_grpo_advantages(
             Rank.WORST: config.decay_rate ** 2
         }
 
-    # Compute base rewards
     rewards = {}
     safety_bonuses = {}
 
     for trace in traces:
         base_reward = rank_to_reward[trace.rank]
 
-        # Healthcare safety shaping:
-        # In medical AI, false negatives (missing a serious condition) are worse
-        # than false positives (unnecessary referral). We want models that err
-        # on the side of caution - suggesting specialist consultation, emergency
-        # care, or further testing when there's uncertainty.
-        #
-        # This bonus rewards traces that include clinical escalation language,
-        # even if their base reasoning rank is lower. A trace that says
-        # "this could be X, but consult cardiology to rule out Y" shows
-        # appropriate clinical caution.
+        # safety shaping: bonus for clinical escalation language
+        # in medical ai, we want models that err on the side of caution
         safety_bonus = 0.0
         if config.use_safety_shaping:
             trace_lower = trace.text.lower()
@@ -359,15 +293,13 @@ def compute_grpo_advantages(
         rewards[trace.trace_id] = base_reward + safety_bonus
         safety_bonuses[trace.trace_id] = safety_bonus
 
-    # Compute group statistics
+    # group statistics
     reward_values = list(rewards.values())
     mean_reward = sum(reward_values) / len(reward_values)
-
-    # Standard deviation
     variance = sum((r - mean_reward) ** 2 for r in reward_values) / len(reward_values)
     std_reward = math.sqrt(variance)
 
-    # Compute advantages: (reward - mean) / (std + eps)
+    # advantages: normalized rewards
     advantages = {}
     for trace_id, reward in rewards.items():
         advantages[trace_id] = (reward - mean_reward) / (std_reward + config.eps)
@@ -385,7 +317,7 @@ def compute_grpo_advantages(
 
 @dataclass
 class OptimizationResult:
-    """Combined result of all optimization computations."""
+    """combined dpo and grpo results."""
     dpo: DPOResult
     grpo: GRPOResult
     sample_id: str
@@ -394,27 +326,21 @@ class OptimizationResult:
 
 class Optimizer:
     """
-    Main optimizer class that orchestrates DPO and GRPO computations.
+    computes dpo and grpo optimization signals.
 
-    This class computes the optimization signals that would be used in
-    post-training to align a model with human preferences. The signals
-    computed here are exactly what would flow through the backward pass
+    this is the core of post-training preference learning.
+    the signals computed here are exactly what would update model weights
     during actual training.
 
-    Design philosophy:
-    - Pragmatic: focuses on the math that matters (loss computation)
-    - Extensible: clean separation between DPO and GRPO
-    - Healthcare-aware: supports safety shaping for clinical contexts
+    we compute signals without training to:
+      - demonstrate the math clearly
+      - allow exploration without gpu
+      - focus on preference learning, not training infrastructure
 
-    In a full training loop, you would:
-    1. Compute these signals for a batch of samples
-    2. Backpropagate the DPO loss through the policy model
-    3. Update weights with your optimizer (AdamW, etc.)
-
-    We compute signals without training to:
-    - Demonstrate understanding of the underlying math
-    - Allow exploration without GPU requirements
-    - Focus on preference learning logic, not training infrastructure
+    in a real training loop you would:
+      1. compute these signals for a batch
+      2. backprop the dpo loss
+      3. update weights with adamw or similar
     """
 
     def __init__(
@@ -424,17 +350,11 @@ class Optimizer:
         config: Config
     ):
         """
-        Initialize optimizer with models and configuration.
+        set up optimizer with models and config.
 
-        The reference model is crucial for DPO - it provides the baseline
-        distribution that we compute KL divergence against. In standard DPO,
-        this is the SFT model (post supervised fine-tuning, pre preference
-        optimization). Here we use random weights to simulate this baseline.
-
-        Args:
-            policy_model: Policy model with pretrained weights
-            reference_model: Reference model (baseline for KL constraint)
-            config: Full configuration including DPO and GRPO settings
+        the reference model provides the baseline for kl divergence.
+        in standard dpo, this is the sft model (after supervised fine-tuning,
+        before preference optimization).
         """
         self.policy_model = policy_model
         self.reference_model = reference_model
@@ -446,22 +366,11 @@ class Optimizer:
         prompt: str,
         traces: List[RankedTrace]
     ) -> OptimizationResult:
-        """
-        Compute all optimization signals for a set of ranked traces.
-
-        Args:
-            sample_id: Identifier for the sample
-            prompt: The input prompt
-            traces: List of 3 traces with Best, Middle, Worst rankings
-
-        Returns:
-            OptimizationResult containing DPO and GRPO outputs
-        """
-        # Validate input
+        """compute dpo and grpo signals for ranked traces."""
         if len(traces) != 3:
-            raise ValueError(f"Expected 3 traces, got {len(traces)}")
+            raise ValueError(f"expected 3 traces, got {len(traces)}")
 
-        # Extract traces by rank
+        # find traces by rank
         best_trace = None
         middle_trace = None
         worst_trace = None
@@ -475,9 +384,9 @@ class Optimizer:
                 worst_trace = trace
 
         if not all([best_trace, middle_trace, worst_trace]):
-            raise ValueError("Must have exactly one trace of each rank (Best, Middle, Worst)")
+            raise ValueError("need exactly one trace of each rank")
 
-        # Compute DPO loss (Best vs Worst)
+        # dpo: best vs worst
         dpo_result = compute_dpo_loss(
             prompt=prompt,
             chosen_trace=best_trace,
@@ -487,7 +396,7 @@ class Optimizer:
             config=self.config.dpo
         )
 
-        # Compute GRPO advantages (all three traces)
+        # grpo: all three traces
         grpo_result = compute_grpo_advantages(
             traces=traces,
             config=self.config.grpo
@@ -501,48 +410,41 @@ class Optimizer:
         )
 
     def format_results(self, result: OptimizationResult) -> str:
-        """Format optimization results for display."""
+        """format results for display."""
         lines = []
         lines.append("=" * 60)
-        lines.append(f"OPTIMIZATION RESULTS - {result.sample_id}")
+        lines.append(f"optimization results - {result.sample_id}")
         lines.append("=" * 60)
 
-        # DPO Results
-        lines.append("\n--- DPO (Direct Preference Optimization) ---")
-        lines.append(f"Beta: {result.dpo.beta:.4f} (effective: {result.dpo.effective_beta:.4f})")
-        lines.append(f"Log-prob mode: {result.dpo.log_prob_mode.value}")
+        # dpo
+        lines.append("\n--- dpo ---")
+        lines.append(f"beta: {result.dpo.beta:.4f} (effective: {result.dpo.effective_beta:.4f})")
+        lines.append(f"log-prob mode: {result.dpo.log_prob_mode.value}")
         lines.append("")
-        lines.append(f"Chosen trace: {result.dpo.chosen_trace_id}")
-        lines.append(f"  Policy log-prob (sum): {result.dpo.chosen_logprobs.policy_sum:.4f}")
-        lines.append(f"  Policy log-prob (mean): {result.dpo.chosen_logprobs.policy_mean:.4f}")
-        lines.append(f"  Reference log-prob (sum): {result.dpo.chosen_logprobs.reference_sum:.4f}")
-        lines.append(f"  Reference log-prob (mean): {result.dpo.chosen_logprobs.reference_mean:.4f}")
-        lines.append(f"  Implicit reward: {result.dpo.chosen_reward:.4f}")
+        lines.append(f"chosen: {result.dpo.chosen_trace_id}")
+        lines.append(f"  policy log-prob: {result.dpo.chosen_logprobs.policy_mean:.4f}")
+        lines.append(f"  reference log-prob: {result.dpo.chosen_logprobs.reference_mean:.4f}")
+        lines.append(f"  implicit reward: {result.dpo.chosen_reward:.4f}")
         lines.append("")
-        lines.append(f"Rejected trace: {result.dpo.rejected_trace_id}")
-        lines.append(f"  Policy log-prob (sum): {result.dpo.rejected_logprobs.policy_sum:.4f}")
-        lines.append(f"  Policy log-prob (mean): {result.dpo.rejected_logprobs.policy_mean:.4f}")
-        lines.append(f"  Reference log-prob (sum): {result.dpo.rejected_logprobs.reference_sum:.4f}")
-        lines.append(f"  Reference log-prob (mean): {result.dpo.rejected_logprobs.reference_mean:.4f}")
-        lines.append(f"  Implicit reward: {result.dpo.rejected_reward:.4f}")
+        lines.append(f"rejected: {result.dpo.rejected_trace_id}")
+        lines.append(f"  policy log-prob: {result.dpo.rejected_logprobs.policy_mean:.4f}")
+        lines.append(f"  reference log-prob: {result.dpo.rejected_logprobs.reference_mean:.4f}")
+        lines.append(f"  implicit reward: {result.dpo.rejected_reward:.4f}")
         lines.append("")
-        lines.append(f"Margin (chosen - rejected): {result.dpo.margin:.4f}")
-        lines.append(f"DPO Loss: {result.dpo.loss:.4f}")
+        lines.append(f"margin: {result.dpo.margin:.4f}")
+        lines.append(f"loss: {result.dpo.loss:.4f}")
 
-        # GRPO Results
-        lines.append("\n--- GRPO (Group Relative Policy Optimization) ---")
-        lines.append(f"Group mean reward: {result.grpo.mean_reward:.4f}")
-        lines.append(f"Group std reward: {result.grpo.std_reward:.4f}")
+        # grpo
+        lines.append("\n--- grpo ---")
+        lines.append(f"mean reward: {result.grpo.mean_reward:.4f}")
+        lines.append(f"std reward: {result.grpo.std_reward:.4f}")
         lines.append("")
-        lines.append("Per-trace results:")
         for trace_id in result.grpo.trace_ids:
             reward = result.grpo.rewards[trace_id]
             advantage = result.grpo.advantages[trace_id]
             safety = result.grpo.safety_bonuses.get(trace_id, 0)
-            safety_str = f" (safety bonus: {safety:.2f})" if safety > 0 else ""
-            lines.append(f"  {trace_id}:")
-            lines.append(f"    Reward: {reward:.4f}{safety_str}")
-            lines.append(f"    Advantage: {advantage:.4f}")
+            safety_str = f" (+{safety:.2f} safety)" if safety > 0 else ""
+            lines.append(f"  {trace_id}: reward={reward:.2f}{safety_str}, advantage={advantage:+.4f}")
 
         lines.append("")
         lines.append("=" * 60)
@@ -550,50 +452,47 @@ class Optimizer:
         return "\n".join(lines)
 
 
-# For command-line testing
+# command-line test
 if __name__ == "__main__":
     from config import get_config
     from model_interface import create_model
 
     config = get_config()
 
-    print("Initializing policy model (pretrained weights)...")
+    print("loading policy model...")
     policy_model = create_model(config.model, use_random_weights=False)
 
-    print("Initializing reference model (RANDOM weights)...")
+    print("loading reference model (random weights)...")
     reference_model = create_model(
         config.model,
         use_random_weights=True,
         random_seed=config.dpo.reference_model_seed
     )
 
-    # Create test traces
     test_traces = [
         RankedTrace(
-            trace_id="test_trace_0",
-            text="Let me think about this step by step. First, we need to consider the symptoms. Given the presentation, the answer is B.",
+            trace_id="trace_0",
+            text="let me think step by step. the symptoms suggest... the answer is B.",
             rank=Rank.BEST
         ),
         RankedTrace(
-            trace_id="test_trace_1",
-            text="This is a medical question about cardiac issues. After analysis, I believe the answer is B.",
+            trace_id="trace_1",
+            text="this is about cardiac issues. after analysis, the answer is B.",
             rank=Rank.MIDDLE
         ),
         RankedTrace(
-            trace_id="test_trace_2",
-            text="The symptoms suggest a cardiovascular problem. The answer is B.",
+            trace_id="trace_2",
+            text="cardiovascular problem. answer is B.",
             rank=Rank.WORST
         ),
     ]
 
-    test_prompt = "What cardiac abnormality explains these findings? A) MVP B) PFO C) HCM D) VSD"
+    test_prompt = "what cardiac abnormality explains these findings? A) MVP B) PFO C) HCM D) VSD"
 
-    print("\nCreating optimizer...")
+    print("\ncomputing optimization signals...")
     optimizer = Optimizer(policy_model, reference_model, config)
-
-    print("\nComputing optimization signals...")
     result = optimizer.compute_optimization_signals(
-        sample_id="test_sample",
+        sample_id="test",
         prompt=test_prompt,
         traces=test_traces
     )
