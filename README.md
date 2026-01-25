@@ -61,50 +61,17 @@ edit `config.py` to change stuff:
 
 **GRPO**: `advantage = (reward - mean) / std` - normalizes rewards relative to the group
 
-## Data Format
+## data format
 
-Each sample JSON file should contain:
-
+sample json files look like:
 ```json
 {
-  "Questions": "Full question text with multiple choice options...",
-  "Answer": "B",
-  "Reasoning": "Optional example reasoning trace..."
+  "Questions": "the medical question...",
+  "Answer": "B"
 }
 ```
 
-The system handles schema variations (e.g., `question` vs `Questions`) and fails loudly with clear errors if required fields are missing.
+## if things break
 
-## Development
-
-### Running Tests
-
-```bash
-# Test the optimizer directly
-python optimizer.py
-
-# Test the sampler
-python sampler.py
-```
-
-### Adding New Model Backends
-
-1. Create a new class implementing `ModelInterface`
-2. Implement `generate()` and `compute_log_prob()` methods
-3. Add backend enum value to `config.py`
-4. Update `create_model()` factory function
-
-## Troubleshooting
-
-**"No pre-generated traces found"**: Run `python sampler.py` first to generate traces.
-
-**Memory issues**: Use a smaller model (e.g., `distilgpt2`) or switch to API backend.
-
-**Slow generation**: Use the trace cache to avoid regeneration. For APIs with rate limits, set `post_generation_sleep_seconds` in config.
-
-## Architecture Notes
-
-- **Model-Agnostic**: All LLM interactions go through `ModelInterface` abstraction
-- **Caching**: Log-prob computations are cached using deterministic hashes
-- **Resumable**: Trace generation can be interrupted and resumed from cache
-- **Healthcare-Aware**: Optional safety shaping rewards clinically cautious reasoning
+- "no traces found" -> run `python sampler.py` first
+- out of memory -> use a smaller model or switch to api backend
