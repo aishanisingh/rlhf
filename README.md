@@ -98,17 +98,18 @@ This normalizes rewards relative to the group:
 
 GRPO is useful when you have more than 2 responses to compare, since it uses information from all of them rather than just the extremes.
 
-## data format
+## Data Format
 
-sample json files look like:
+Sample JSON files should have this structure:
 ```json
 {
-  "Questions": "the medical question...",
-  "Answer": "B"
+  "Questions": "Full medical question with multiple choice options...",
+  "Answer": "B",
+  "Reasoning": "Optional example reasoning..."
 }
 ```
 
-## if things break
+## Troubleshooting
 
-- "no traces found" -> run `python sampler.py` first
-- out of memory -> use a smaller model or switch to api backend
+- **"No traces found"** - Run `python sampler.py` first to generate traces
+- **Out of memory** - Use a smaller model (e.g., `distilgpt2`) or switch to an API backend
