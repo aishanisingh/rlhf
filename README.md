@@ -1,16 +1,16 @@
-# TriFetch Online RLHF Workbench
+# TriFetch
 
-A functional prototype for post-training medical AI models using human preference feedback. This system computes optimization signals using Direct Preference Optimization (DPO) and Group Relative Policy Optimization (GRPO) methods.
+an rlhf workbench for post-training medical AI with human feedback. uses DPO and GRPO to figure out which AI reasoning traces are better.
 
-## Overview
+## what it does
 
-The workbench implements a complete RLHF pipeline for medical QA:
+basically a pipeline for medical QA:
 
-1. **Trace Generation**: Generate candidate reasoning traces using rejection sampling
-2. **Human Ranking**: Clinicians rank traces as Best, Middle, and Worst
-3. **Optimization Signals**: Compute DPO and GRPO optimization signals
+1. generate a bunch of reasoning traces
+2. have humans rank them (best, middle, worst)
+3. compute optimization signals based on the rankings
 
-The emphasis is on **mathematical correctness** and **post-training intuition** rather than end-to-end training.
+the goal is to understand the math behind rlhf, not to actually train a model end-to-end.
 
 ## Project Structure
 
