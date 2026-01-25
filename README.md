@@ -18,7 +18,7 @@ the goal is to understand the math behind rlhf, not to train a model end-to-end.
 - `model_interface.py` - abstraction layer for different llm backends
 - `sampler.py` - trace generation with rejection sampling
 - `optimizer.py` - dpo and grpo computation logic
-- `streamlit_app.py` - web interface
+- `main.py` - local cli interface
 - `sample[1-5].json` - medical qa samples
 
 ## setup
@@ -32,28 +32,40 @@ pip install -r requirements.txt
 
 ## usage
 
-1. generate traces first:
+1. generate traces first (if not already cached):
 ```bash
 python sampler.py
 ```
 
-2. run the ui:
+2. run the local cli:
 ```bash
-streamlit run streamlit_app.py
+python main.py
 ```
 
-3. select a medical question, rank the 3 ai responses (best/middle/worst), and click compute
-
-you'll see dpo loss + margin, and grpo advantages for each trace.
+the cli will:
+- load the policy model (Qwen2-1.5B-Instruct by default)
+- load a reference model with random weights
+- let you select a medical question
+- show 3 ai-generated reasoning traces
+- let you rank them (best/middle/worst)
+- compute real dpo and grpo signals using actual log-probabilities
 
 ## configuration
 
 edit `config.py` to change settings:
 
+- `local_model_name` - huggingface model to use (default: `Qwen/Qwen2-1.5B-Instruct`)
 - `beta` - kl penalty coefficient, controls how much the policy can diverge from reference (default 0.1)
 - `reward_best/middle/worst` - reward values assigned to each rank (1.0, 0.5, 0.0)
-- `local_model_name` - huggingface model to use for local inference
 - `backend` - model backend: `local_transformers`, `openai`, `vllm`, or `groq`
+
+for api backends, set environment variables:
+```bash
+export GROQ_API_KEY="your-key"  # auto-configures groq backend
+# or
+export TRIFETCH_API_KEY="your-key"
+export TRIFETCH_API_BASE_URL="https://api.openai.com/v1"
+```
 
 ## optimization math
 
@@ -111,5 +123,6 @@ sample json files should have this structure:
 
 ## troubleshooting
 
-- **"no traces found"** - run `python sampler.py` first to generate traces
-- **out of memory** - use a smaller model (e.g., `distilgpt2`) or switch to an api backend
+- **"no samples with cached traces found"** - run `python sampler.py` first to generate traces
+- **out of memory** - use a smaller model in config.py (e.g., `Qwen/Qwen2-0.5B-Instruct`)
+- **slow log-prob computation** - results are cached in `.logprob_cache_*.json` files, subsequent runs will be faster
