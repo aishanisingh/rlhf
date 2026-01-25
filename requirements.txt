@@ -1,4 +1,7 @@
-# core dependencies
+# ui
+gradio>=4.0.0
+
+# ml (for main.py cli with real models)
 torch>=2.0.0
 transformers>=4.35.0
 numpy>=1.24.0
