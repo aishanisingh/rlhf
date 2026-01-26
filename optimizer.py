@@ -57,7 +57,7 @@ class DPOResult:
     loss: float
     margin: float  # chosen - rejected
 
-    # implict rewards
+    # implicit rewards
     chosen_reward: float
     rejected_reward: float
 
@@ -136,12 +136,12 @@ def compute_dpo_loss(
     - margin = r_chosen - r_rejected
 
     positive margin = model prefers chosen (good)
-    negative margin = model prefers rejected (needs trainng)
+    negative margin = model prefers rejected (needs training)
 
     beta controls how agressive the learning is
 
     we use rejection sampling so both traces have correct answers,
-    were just comparing reasoning qualty not correctness
+    we're just comparing reasoning quality not correctness
     """
     # get logprobs for both
     chosen_logprobs = compute_log_probs_for_trace(
@@ -204,7 +204,7 @@ def compute_grpo_advantages(
     positive advantage = better than avg, reinforce
     negative advantage = worse than avg, discourage
 
-    theres also optional saftey shaping for medical stuff
+    theres also optional safety shaping for medical stuff
     (bonus for saying things like "consult specialist")
     """
     if len(traces) != 3:
@@ -231,7 +231,7 @@ def compute_grpo_advantages(
     for trace in traces:
         base_reward = rank_to_reward[trace.rank]
 
-        # saftey bonus for medical escalation language
+        # safety bonus for medical escalation language
         safety_bonus = 0.0
         if config.use_safety_shaping:
             trace_lower = trace.text.lower()

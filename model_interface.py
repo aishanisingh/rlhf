@@ -446,7 +446,7 @@ def create_model(
         )
     elif config.backend in (ModelBackend.OPENAI, ModelBackend.VLLM, ModelBackend.GROQ):
         if use_random_weights:
-            raise ValueError("cant use random weights with api backend")
+            raise ValueError("can't use random weights with api backend")
         model = OpenAICompatibleModel(config)
     else:
         raise ValueError(f"unknown backend: {config.backend}")

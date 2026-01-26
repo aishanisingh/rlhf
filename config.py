@@ -106,11 +106,11 @@ class GRPOConfig:
     log_prob_mode: LogProbMode = LogProbMode.LENGTH_NORMALIZED
     eps: float = 1e-8
 
-    # exponential decay (optional)
+    # exponetial decay (optional)
     use_exponential_decay: bool = False
     decay_rate: float = 0.5
 
-    # saftey shaping for medical stuff
+    # safety shaping for medical stuff
     use_safety_shaping: bool = False
     safety_keywords: list = field(default_factory=lambda: [
         "consult", "emergency", "immediate", "urgent", "refer",

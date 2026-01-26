@@ -65,7 +65,7 @@ def load_sample(file_path: str) -> MedicalQASample:
             break
 
     if question is None:
-        raise ValueError(f"cant find question in {file_path}")
+        raise ValueError(f"can't find question in {file_path}")
 
     answer = None
     for key in answer_keys:
@@ -74,7 +74,7 @@ def load_sample(file_path: str) -> MedicalQASample:
             break
 
     if answer is None:
-        raise ValueError(f"cant find answer in {file_path}")
+        raise ValueError(f"can't find answer in {file_path}")
 
     sample_id = Path(file_path).stem
     options = _parse_options(question)
@@ -245,7 +245,7 @@ class TraceCache:
             print(f"[cache] error saving {sample_id}: {e}")
 
     def has_complete_traces(self, sample_id: str, required: int) -> bool:
-        """check if we have enought traces"""
+        """check if we have enough traces"""
         cached = self.load(sample_id)
         if cached and len(cached.get("verified_traces", [])) >= required:
             return True
@@ -280,7 +280,7 @@ def generate_traces(
 
     keeps generating until we get enough traces that:
     1. have correct answer
-    2. are different from eachother
+    2. are different from each other
     """
     sample_id = sample.sample_id
     print(f"\n[sampler] generating for {sample_id} (answer: {sample.answer})")
@@ -365,7 +365,7 @@ def generate_traces(
 
         if not is_correct:
             if extracted_answer is None:
-                print(f"[sampler] couldnt extract answer")
+                print(f"[sampler] couldn't extract answer")
             else:
                 print(f"[sampler] wrong: {extracted_answer} != {sample.answer}")
             continue
@@ -429,7 +429,7 @@ def generate_all_traces(
     model: ModelInterface,
     config: Config
 ) -> Dict[str, VerifiedTraceSet]:
-    """generate for all samples"""
+    """generate for all smaples"""
     cache = TraceCache(config.sampler.cache_dir)
     results = {}
 

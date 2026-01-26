@@ -105,7 +105,7 @@ def print_dpo_results(dpo: DPOResult):
     if dpo.margin > 0:
         print("  model already prefers chosen (good)")
     else:
-        print("  model prefers rejected (needs trainng)")
+        print("  model prefers rejected (needs training)")
 
 
 def print_grpo_results(grpo: GRPOResult, rankings: Dict[str, Rank]):
