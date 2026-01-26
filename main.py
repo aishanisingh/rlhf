@@ -1,8 +1,7 @@
 """
-trifetch cli interface.
+trifetch cli
 
-interactive terminal for computing dpo and grpo optimization signals
-using real model log-probabilities.
+interactive terminal for dpo and grpo signals
 """
 import json
 import os
@@ -14,10 +13,10 @@ from model_interface import create_model
 from optimizer import Optimizer, RankedTrace, Rank, DPOResult, GRPOResult
 
 
-# ============== data loading ==============
+# ============== loading ==============
 
 def load_sample(sample_path: str) -> Dict:
-    """load a medical qa sample from json."""
+    """load sample json"""
     with open(sample_path, 'r') as f:
         data = json.load(f)
     return {
@@ -28,14 +27,14 @@ def load_sample(sample_path: str) -> Dict:
 
 
 def load_traces(cache_path: str) -> List[Dict]:
-    """load pre-generated traces from cache."""
+    """load cached traces"""
     with open(cache_path, 'r') as f:
         data = json.load(f)
     return data.get("verified_traces", [])
 
 
 def get_available_samples(data_dir: str = ".") -> List[Tuple[str, str, str]]:
-    """find all samples with cached traces."""
+    """find samples with traces"""
     samples = []
     cache_dir = os.path.join(data_dir, ".trace_cache")
 
@@ -49,27 +48,27 @@ def get_available_samples(data_dir: str = ".") -> List[Tuple[str, str, str]]:
     return samples
 
 
-# ============== display functions ==============
+# ============== display ==============
 
 def clear_screen():
-    """clear terminal screen."""
+    """clear screen"""
     os.system('cls' if os.name == 'nt' else 'clear')
 
 
 def print_header(text: str):
-    """print a formatted header."""
+    """header"""
     print("\n" + "=" * 60)
     print(f"  {text}")
     print("=" * 60)
 
 
 def print_section(text: str):
-    """print a section header."""
+    """section header"""
     print(f"\n--- {text} ---\n")
 
 
 def print_trace(idx: int, trace: Dict, show_full: bool = False):
-    """display a trace with formatting."""
+    """display trace"""
     text = trace["text"]
     token_count = trace.get("token_count", len(text.split()))
 
@@ -79,45 +78,44 @@ def print_trace(idx: int, trace: Dict, show_full: bool = False):
     if show_full or len(text) < 500:
         print(text)
     else:
-        # truncate for display
         print(text[:500] + "...")
-        print(f"\n  (truncated - {len(text)} chars total)")
+        print(f"\n  (truncated - {len(text)} chars)")
     print()
 
 
 def print_dpo_results(dpo: DPOResult):
-    """display dpo computation results."""
-    print_section("dpo results (direct preference optimization)")
+    """show dpo results"""
+    print_section("dpo results")
 
     print(f"  loss:                {dpo.loss:.6f}")
     print(f"  margin:              {dpo.margin:+.6f}")
     print(f"  beta:                {dpo.beta:.4f} (effective: {dpo.effective_beta:.4f})")
     print()
     print(f"  chosen trace:        {dpo.chosen_trace_id}")
-    print(f"    policy log-prob:   {dpo.chosen_logprobs.policy_mean:.4f} (mean)")
-    print(f"    reference log-prob:{dpo.chosen_logprobs.reference_mean:.4f} (mean)")
+    print(f"    policy logprob:    {dpo.chosen_logprobs.policy_mean:.4f}")
+    print(f"    reference logprob: {dpo.chosen_logprobs.reference_mean:.4f}")
     print(f"    implicit reward:   {dpo.chosen_reward:+.4f}")
     print()
     print(f"  rejected trace:      {dpo.rejected_trace_id}")
-    print(f"    policy log-prob:   {dpo.rejected_logprobs.policy_mean:.4f} (mean)")
-    print(f"    reference log-prob:{dpo.rejected_logprobs.reference_mean:.4f} (mean)")
+    print(f"    policy logprob:    {dpo.rejected_logprobs.policy_mean:.4f}")
+    print(f"    reference logprob: {dpo.rejected_logprobs.reference_mean:.4f}")
     print(f"    implicit reward:   {dpo.rejected_reward:+.4f}")
     print()
 
     if dpo.margin > 0:
-        print("  interpretation: model already prefers the chosen response.")
+        print("  model already prefers chosen (good)")
     else:
-        print("  interpretation: model prefers the rejected response - training needed.")
+        print("  model prefers rejected (needs trainng)")
 
 
 def print_grpo_results(grpo: GRPOResult, rankings: Dict[str, Rank]):
-    """display grpo computation results."""
-    print_section("grpo results (group relative policy optimization)")
+    """show grpo results"""
+    print_section("grpo results")
 
     print(f"  mean reward:   {grpo.mean_reward:.4f}")
     print(f"  std reward:    {grpo.std_reward:.4f}")
     print()
-    print("  per-trace advantages:")
+    print("  advantages:")
 
     for trace_id in grpo.trace_ids:
         rank = rankings.get(trace_id, Rank.MIDDLE)
@@ -127,16 +125,15 @@ def print_grpo_results(grpo: GRPOResult, rankings: Dict[str, Rank]):
         print(f"    {rank.value:6s}: reward={reward:.2f}, advantage={advantage:+.4f}")
 
     print()
-    print("  interpretation:")
-    print("    positive advantage = better than group average")
-    print("    negative advantage = worse than group average")
+    print("  positive = better than avg")
+    print("  negative = worse than avg")
 
 
-# ============== interactive cli ==============
+# ============== interactive ==============
 
 def select_sample(samples: List[Tuple[str, str, str]]) -> Tuple[str, str, str]:
-    """let user select a sample."""
-    print_section("available samples")
+    """pick a sample"""
+    print_section("samples")
 
     for i, (sample_id, sample_path, _) in enumerate(samples):
         sample = load_sample(sample_path)
@@ -146,20 +143,20 @@ def select_sample(samples: List[Tuple[str, str, str]]) -> Tuple[str, str, str]:
     print()
     while True:
         try:
-            choice = input("select sample (1-{}): ".format(len(samples))).strip()
+            choice = input("pick one (1-{}): ".format(len(samples))).strip()
             idx = int(choice) - 1
             if 0 <= idx < len(samples):
                 return samples[idx]
         except (ValueError, IndexError):
             pass
-        print("invalid selection. try again.")
+        print("invalid, try again")
 
 
 def get_rankings(traces: List[Dict]) -> Dict[str, Rank]:
-    """get user rankings for traces."""
-    print_section("rank the responses")
-    print("assign each response a rank: best (b), middle (m), or worst (w)")
-    print("each rank must be used exactly once.\n")
+    """get user rankings"""
+    print_section("rank the traces")
+    print("b = best, m = middle, w = worst")
+    print("each rank used once\n")
 
     rankings = {}
     rank_map = {'b': Rank.BEST, 'm': Rank.MIDDLE, 'w': Rank.WORST}
@@ -174,49 +171,44 @@ def get_rankings(traces: List[Dict]) -> Dict[str, Rank]:
             if choice in rank_map:
                 rank = rank_map[choice]
                 if rank in used_ranks:
-                    print(f"  '{rank.value}' already assigned. choose another.")
+                    print(f"  already used {rank.value}")
                 else:
                     rankings[trace["trace_id"]] = rank
                     used_ranks.add(rank)
                     print(f"  -> {rank.value}")
                     break
             else:
-                print("  invalid input. use 'b' for best, 'm' for middle, 'w' for worst.")
+                print("  use b, m, or w")
 
     return rankings
 
 
 def run_interactive(optimizer: Optimizer, samples: List[Tuple[str, str, str]]):
-    """run the interactive cli loop."""
+    """main loop"""
     while True:
         clear_screen()
-        print_header("trifetch rlhf workbench")
+        print_header("trifetch")
 
-        # select sample
         sample_id, sample_path, trace_path = select_sample(samples)
         sample = load_sample(sample_path)
         traces = load_traces(trace_path)
 
         if len(traces) < 3:
-            print(f"\nerror: need at least 3 traces, found {len(traces)}")
-            input("press enter to continue...")
+            print(f"\nerror: need 3 traces, found {len(traces)}")
+            input("press enter...")
             continue
 
-        # limit to 3 traces
         traces = traces[:3]
 
         clear_screen()
         print_header(f"sample: {sample_id}")
 
-        # show question
         print_section("question")
         print(sample["question"])
-        print(f"\ncorrect answer: {sample['answer']}")
+        print(f"\nanswer: {sample['answer']}")
 
-        # get rankings
         rankings = get_rankings(traces)
 
-        # convert to RankedTrace objects
         ranked_traces = []
         for trace in traces:
             ranked_traces.append(RankedTrace(
@@ -225,10 +217,8 @@ def run_interactive(optimizer: Optimizer, samples: List[Tuple[str, str, str]]):
                 rank=rankings[trace["trace_id"]]
             ))
 
-        # compute optimization signals
-        print_section("computing optimization signals")
-        print("this may take a moment as we compute log-probabilities...")
-        print()
+        print_section("computing...")
+        print("this might take a sec\n")
 
         result = optimizer.compute_optimization_signals(
             sample_id=sample_id,
@@ -236,7 +226,6 @@ def run_interactive(optimizer: Optimizer, samples: List[Tuple[str, str, str]]):
             traces=ranked_traces
         )
 
-        # display results
         clear_screen()
         print_header(f"results: {sample_id}")
 
@@ -244,34 +233,31 @@ def run_interactive(optimizer: Optimizer, samples: List[Tuple[str, str, str]]):
         print_grpo_results(result.grpo, rankings)
 
         print("\n" + "=" * 60)
-        choice = input("\nanother sample? (y/n): ").strip().lower()
+        choice = input("\nanother one? (y/n): ").strip().lower()
         if choice != 'y':
             break
 
-    print("\ngoodbye!")
+    print("\nbye!")
 
 
 # ============== main ==============
 
 def main():
-    """main entry point."""
-    print_header("trifetch rlhf workbench")
-    print("\ninitializing models...\n")
+    """entry point"""
+    print_header("trifetch")
+    print("\nloading models...\n")
 
-    # get config
     config = get_config()
 
-    # check for available samples
     samples = get_available_samples(".")
     if not samples:
-        print("error: no samples with cached traces found.")
-        print("run 'python sampler.py' first to generate traces.")
+        print("error: no samples found")
+        print("run 'python sampler.py' first")
         sys.exit(1)
 
-    print(f"found {len(samples)} samples with cached traces.\n")
+    print(f"found {len(samples)} samples\n")
 
-    # load policy model (pretrained)
-    print("loading policy model (pretrained weights)...")
+    print("loading policy model...")
     policy_model = create_model(
         config.model,
         use_random_weights=False,
@@ -280,8 +266,7 @@ def main():
     )
     print(f"  -> {policy_model.get_model_info()}\n")
 
-    # load reference model (random weights)
-    print("loading reference model (random weights)...")
+    print("loading reference model...")
     reference_model = create_model(
         config.model,
         use_random_weights=True,
@@ -291,13 +276,11 @@ def main():
     )
     print(f"  -> {reference_model.get_model_info()}\n")
 
-    # create optimizer
     optimizer = Optimizer(policy_model, reference_model, config)
 
-    print("models loaded successfully!")
+    print("ready!")
     input("\npress enter to start...")
 
-    # run interactive loop
     run_interactive(optimizer, samples)
 
 

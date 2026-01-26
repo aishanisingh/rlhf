@@ -1,7 +1,6 @@
 """
-config for trifetch.
-
-all settings can be overridden via environment variables with TRIFETCH_ prefix.
+config for trifetch
+can override with TRIFETCH_ env vars
 """
 import os
 from dataclasses import dataclass, field
@@ -10,7 +9,7 @@ from enum import Enum
 
 
 class ModelBackend(Enum):
-    """supported model backends."""
+    """model backends"""
     LOCAL_TRANSFORMERS = "local_transformers"
     VLLM = "vllm"
     OPENAI = "openai"
@@ -18,33 +17,33 @@ class ModelBackend(Enum):
 
 
 class LogProbMode(Enum):
-    """how to aggregate token log-probs."""
-    SUM = "sum"  # sum of token log-probs
-    LENGTH_NORMALIZED = "length_normalized"  # mean of token log-probs
+    """how to aggregate logprobs"""
+    SUM = "sum"
+    LENGTH_NORMALIZED = "length_normalized"  # mean
 
 
 @dataclass
 class ModelConfig:
-    """model backend settings."""
+    """model settings"""
     backend: ModelBackend = ModelBackend.LOCAL_TRANSFORMERS
 
-    # local model settings
-    local_model_name: str = "distilgpt2"  # small and fast (~82MB)
-    local_device: str = "auto"  # "cuda", "mps", "cpu", or "auto"
+    # local stuff
+    local_model_name: str = "distilgpt2"  # small and fast
+    local_device: str = "auto"
 
-    # api settings (for vllm, openai, groq)
+    # api stuff
     api_base_url: Optional[str] = None
     api_key: Optional[str] = None
     api_model_name: Optional[str] = None
 
-    # generation settings
+    # generation params
     max_new_tokens: int = 512
     temperature: float = 0.8
     top_p: float = 0.95
     do_sample: bool = True
 
     def __post_init__(self):
-        # override from environment
+        # env overrides
         if os.environ.get("TRIFETCH_MODEL_BACKEND"):
             self.backend = ModelBackend(os.environ["TRIFETCH_MODEL_BACKEND"])
         if os.environ.get("TRIFETCH_LOCAL_MODEL"):
@@ -56,7 +55,7 @@ class ModelConfig:
         if os.environ.get("TRIFETCH_API_MODEL"):
             self.api_model_name = os.environ["TRIFETCH_API_MODEL"]
         if os.environ.get("GROQ_API_KEY"):
-            # auto-configure for groq if key is present
+            # auto setup for groq
             self.backend = ModelBackend.GROQ
             self.api_key = os.environ["GROQ_API_KEY"]
             self.api_model_name = self.api_model_name or "llama-3.1-8b-instant"
@@ -64,89 +63,79 @@ class ModelConfig:
 
 @dataclass
 class SamplerConfig:
-    """rejection sampling settings."""
-    max_attempts_per_trace: int = 50  # max generation attempts per unique trace
-    total_max_attempts: int = 200  # total attempts before giving up
-    required_traces: int = 3  # number of distinct traces needed
+    """rejection sampling settings"""
+    max_attempts_per_trace: int = 50
+    total_max_attempts: int = 200
+    required_traces: int = 3
 
-    # distinctness settings
-    min_jaccard_distance: float = 0.3  # minimum token jaccard distance between traces
-    use_embedding_similarity: bool = False  # use embeddings for distinctness
-    max_embedding_similarity: float = 0.85  # max cosine similarity if using embeddings
+    # distinctness
+    min_jaccard_distance: float = 0.3
+    use_embedding_similarity: bool = False
+    max_embedding_similarity: float = 0.85
 
-    # cache settings
     cache_dir: str = ".trace_cache"
-
-    # optional sleep after each model call (for rate limiting)
-    post_generation_sleep_seconds: float = 0.0  # set > 0 for api rate limiting
+    post_generation_sleep_seconds: float = 0.0  # for rate limiting
 
 
 @dataclass
 class DPOConfig:
-    """dpo settings - direct preference optimization."""
-    beta: float = 0.1  # kl penalty coefficient
+    """dpo settings"""
+    beta: float = 0.1  # kl penalty
 
-    # log-prob mode
     log_prob_mode: LogProbMode = LogProbMode.LENGTH_NORMALIZED
 
-    # optional: token-length-aware beta scaling
+    # length scaling (optional)
     use_length_scaling: bool = False
-    length_scaling_factor: float = 0.01  # additive scaling per token
+    length_scaling_factor: float = 0.01
 
-    # reference model settings
-    use_pretrained_reference: bool = True  # standard dpo uses pretrained reference
-    reference_model_seed: int = 42  # only used if use_pretrained_reference=False
+    # reference model
+    use_pretrained_reference: bool = True
+    reference_model_seed: int = 42
 
-    # numerical stability
     eps: float = 1e-8
 
 
 @dataclass
 class GRPOConfig:
-    """grpo settings - group relative policy optimization."""
-    # default rank rewards
+    """grpo settings"""
+    # rank rewards
     reward_best: float = 1.0
     reward_middle: float = 0.5
     reward_worst: float = 0.0
 
-    # log-prob mode
     log_prob_mode: LogProbMode = LogProbMode.LENGTH_NORMALIZED
-
-    # numerical stability
     eps: float = 1e-8
 
-    # optional: exponential decay rewards
+    # exponential decay (optional)
     use_exponential_decay: bool = False
-    decay_rate: float = 0.5  # if enabled: best=1, middle=decay, worst=decay^2
+    decay_rate: float = 0.5
 
-    # optional: healthcare safety shaping
+    # saftey shaping for medical stuff
     use_safety_shaping: bool = False
     safety_keywords: list = field(default_factory=lambda: [
         "consult", "emergency", "immediate", "urgent", "refer",
         "hospitalize", "monitor closely", "seek medical attention"
     ])
-    safety_bonus: float = 0.2  # bonus for traces containing safety language
+    safety_bonus: float = 0.2
 
 
 @dataclass
 class Config:
-    """main config container."""
+    """main config"""
     model: ModelConfig = field(default_factory=ModelConfig)
     sampler: SamplerConfig = field(default_factory=SamplerConfig)
     dpo: DPOConfig = field(default_factory=DPOConfig)
     grpo: GRPOConfig = field(default_factory=GRPOConfig)
 
-    # data paths
     data_dir: str = "."
     sample_files: list = field(default_factory=lambda: [
         "sample1.json", "sample2.json", "sample3.json",
         "sample4.json", "sample5.json"
     ])
 
-    # log-prob cache
     logprob_cache_file: str = ".logprob_cache.json"
 
 
 def get_config() -> Config:
-    """get the global config instance."""
+    """get config"""
     return Config()
