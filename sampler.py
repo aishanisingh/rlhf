@@ -1,8 +1,8 @@
 """
-Trace generation and rejection sampling for TriFetch RLHF Workbench.
+trace generation and rejection sampling for trifetch.
 
-Generates multiple distinct reasoning traces that all reach the correct answer,
-using rejection sampling with configurable distinctness enforcement.
+generates multiple distinct reasoning traces that all reach the correct answer.
+rejection sampling = keep generating until we get good ones.
 """
 import hashlib
 import json
@@ -19,17 +19,17 @@ from model_interface import ModelInterface, GenerationResult
 
 @dataclass
 class MedicalQASample:
-    """Represents a single medical QA sample."""
+    """a single medical qa sample."""
     sample_id: str
-    question: str  # Full question text including context and options
-    answer: str  # Ground truth answer (e.g., "B")
-    context: str = ""  # Optional extracted context
-    options: Dict[str, str] = field(default_factory=dict)  # Parsed options
+    question: str  # full question text including context and options
+    answer: str  # ground truth answer (e.g., "B")
+    context: str = ""  # optional extracted context
+    options: Dict[str, str] = field(default_factory=dict)  # parsed options
 
 
 @dataclass
 class ReasoningTrace:
-    """A single reasoning trace with metadata."""
+    """a single reasoning trace with metadata."""
     trace_id: str
     text: str
     extracted_answer: str
@@ -40,7 +40,7 @@ class ReasoningTrace:
 
 @dataclass
 class VerifiedTraceSet:
-    """Set of verified distinct traces for a sample."""
+    """set of verified distinct traces for a sample."""
     sample_id: str
     question: str
     ground_truth: str
@@ -51,15 +51,14 @@ class VerifiedTraceSet:
 
 def load_sample(file_path: str) -> MedicalQASample:
     """
-    Load a medical QA sample from JSON file.
+    load a medical qa sample from json file.
 
-    Handles schema variations and validates required fields.
-    Raises clear error messages if required fields are missing.
+    handles schema variations and validates required fields.
     """
     with open(file_path, "r") as f:
         data = json.load(f)
 
-    # Check for required fields with various possible names
+    # check for required fields with various possible names
     question_keys = ["Questions", "questions", "Question", "question", "prompt", "text"]
     answer_keys = ["Answer", "answer", "correct_answer", "ground_truth"]
 
@@ -71,8 +70,8 @@ def load_sample(file_path: str) -> MedicalQASample:
 
     if question is None:
         raise ValueError(
-            f"Missing required question field in {file_path}. "
-            f"Expected one of: {question_keys}. Found keys: {list(data.keys())}"
+            f"missing required question field in {file_path}. "
+            f"expected one of: {question_keys}. found keys: {list(data.keys())}"
         )
 
     answer = None
@@ -83,14 +82,14 @@ def load_sample(file_path: str) -> MedicalQASample:
 
     if answer is None:
         raise ValueError(
-            f"Missing required answer field in {file_path}. "
-            f"Expected one of: {answer_keys}. Found keys: {list(data.keys())}"
+            f"missing required answer field in {file_path}. "
+            f"expected one of: {answer_keys}. found keys: {list(data.keys())}"
         )
 
-    # Extract sample ID from filename
+    # extract sample id from filename
     sample_id = Path(file_path).stem
 
-    # Parse options if present in the question
+    # parse options if present in the question
     options = _parse_options(question)
 
     return MedicalQASample(
@@ -102,9 +101,9 @@ def load_sample(file_path: str) -> MedicalQASample:
 
 
 def _parse_options(question: str) -> Dict[str, str]:
-    """Extract multiple choice options from question text."""
+    """extract multiple choice options from question text."""
     options = {}
-    # Match patterns like "A) text", "A. text", "A: text"
+    # match patterns like "A) text", "A. text", "A: text"
     pattern = r"([A-E])[).:]\s*([^\n]+?)(?=\n[A-E][).:]|\n\n|$)"
     matches = re.findall(pattern, question, re.MULTILINE)
     for letter, text in matches:
@@ -113,36 +112,36 @@ def _parse_options(question: str) -> Dict[str, str]:
 
 
 def load_all_samples(config: Config) -> List[MedicalQASample]:
-    """Load all sample files specified in configuration."""
+    """load all sample files specified in configuration."""
     samples = []
     for filename in config.sample_files:
         file_path = os.path.join(config.data_dir, filename)
         if not os.path.exists(file_path):
-            print(f"[Sampler] Warning: Sample file not found: {file_path}")
+            print(f"[sampler] warning: sample file not found: {file_path}")
             continue
         try:
             sample = load_sample(file_path)
             samples.append(sample)
-            print(f"[Sampler] Loaded {sample.sample_id}: answer={sample.answer}")
+            print(f"[sampler] loaded {sample.sample_id}: answer={sample.answer}")
         except Exception as e:
-            print(f"[Sampler] Error loading {file_path}: {e}")
+            print(f"[sampler] error loading {file_path}: {e}")
             raise
     return samples
 
 
 def extract_answer(trace: str, valid_options: Set[str] = None) -> Optional[str]:
     """
-    Extract the final answer from a reasoning trace.
+    extract the final answer from a reasoning trace.
 
-    Looks for answer patterns, prioritizing explicit statements.
+    looks for answer patterns, prioritizing explicit statements.
     """
     if valid_options is None:
         valid_options = {"A", "B", "C", "D", "E"}
 
-    # Normalize text
+    # normalize text
     trace_clean = trace.strip()
 
-    # Patterns to look for answer (ordered by specificity)
+    # patterns to look for answer (ordered by specificity)
     patterns = [
         # "The answer is X" or "Answer: X" or "Answer is X"
         r"(?:the\s+)?answer\s*(?:is|:)\s*\(?([A-E])\)?",
@@ -158,11 +157,11 @@ def extract_answer(trace: str, valid_options: Set[str] = None) -> Optional[str]:
         r"(?:most\s+likely|best\s+answer\s+is)\s*\(?([A-E])\)?",
         # "Option X" near the end
         r"option\s*\(?([A-E])\)?",
-        # Standalone letter with context (e.g., "(B)" or "B.")
+        # standalone letter with context (e.g., "(B)" or "B.")
         r"[^\w]([A-E])[).:]",
     ]
 
-    # Search through the trace
+    # search through the trace
     for pattern in patterns:
         matches = list(re.finditer(pattern, trace_clean, re.IGNORECASE))
         if matches:
@@ -170,10 +169,10 @@ def extract_answer(trace: str, valid_options: Set[str] = None) -> Optional[str]:
             if answer in valid_options:
                 return answer
 
-    # Last resort: look for standalone letter in last 100 chars
+    # last resort: look for standalone letter in last 100 chars
     last_part = trace_clean[-100:] if len(trace_clean) > 100 else trace_clean
     for letter in valid_options:
-        # Check for letter with word boundary
+        # check for letter with word boundary
         if re.search(rf'\b{letter}\b', last_part):
             return letter
 
@@ -181,8 +180,8 @@ def extract_answer(trace: str, valid_options: Set[str] = None) -> Optional[str]:
 
 
 def compute_normalized_hash(text: str) -> str:
-    """Compute hash of normalized text for distinctness checking."""
-    # Normalize: lowercase, remove extra whitespace, remove punctuation
+    """compute hash of normalized text for distinctness checking."""
+    # normalize: lowercase, remove extra whitespace, remove punctuation
     normalized = text.lower()
     normalized = re.sub(r'\s+', ' ', normalized)
     normalized = re.sub(r'[^\w\s]', '', normalized)
@@ -191,12 +190,12 @@ def compute_normalized_hash(text: str) -> str:
 
 
 def tokenize_simple(text: str) -> Set[str]:
-    """Simple word tokenization for Jaccard distance."""
-    # Normalize and split on whitespace
+    """simple word tokenization for jaccard distance."""
+    # normalize and split on whitespace
     text = text.lower()
     text = re.sub(r'[^\w\s]', ' ', text)
     tokens = set(text.split())
-    # Remove very common words
+    # remove very common words
     stopwords = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
                  'to', 'of', 'and', 'in', 'that', 'it', 'for', 'on', 'with'}
     return tokens - stopwords
@@ -204,9 +203,9 @@ def tokenize_simple(text: str) -> Set[str]:
 
 def jaccard_distance(text1: str, text2: str) -> float:
     """
-    Compute Jaccard distance between two texts.
+    compute jaccard distance between two texts.
 
-    Returns value in [0, 1] where 1 means completely different.
+    returns value in [0, 1] where 1 means completely different.
     """
     tokens1 = tokenize_simple(text1)
     tokens2 = tokenize_simple(text2)
@@ -230,32 +229,31 @@ def is_sufficiently_distinct(
     config: SamplerConfig
 ) -> Tuple[bool, str]:
     """
-    Check if a new trace is sufficiently distinct from existing traces.
+    check if a new trace is sufficiently distinct from existing traces.
 
-    Returns:
-        Tuple of (is_distinct, reason)
+    returns (is_distinct, reason).
     """
     new_hash = compute_normalized_hash(new_trace)
 
     for i, existing in enumerate(existing_traces):
-        # Check hash collision (exact match after normalization)
+        # check hash collision (exact match after normalization)
         existing_hash = compute_normalized_hash(existing)
         if new_hash == existing_hash:
-            return False, f"Hash collision with trace {i}"
+            return False, f"hash collision with trace {i}"
 
-        # Check Jaccard distance
+        # check jaccard distance
         distance = jaccard_distance(new_trace, existing)
         if distance < config.min_jaccard_distance:
-            return False, f"Jaccard distance {distance:.3f} < {config.min_jaccard_distance} with trace {i}"
+            return False, f"jaccard distance {distance:.3f} < {config.min_jaccard_distance} with trace {i}"
 
-    return True, "Distinct"
+    return True, "distinct"
 
 
 class TraceCache:
     """
-    Disk cache for generated traces to enable resumption.
+    disk cache for generated traces to enable resumption.
 
-    Stores intermediate candidates to avoid recomputation.
+    stores intermediate candidates to avoid recomputation.
     """
 
     def __init__(self, cache_dir: str):
@@ -266,14 +264,14 @@ class TraceCache:
         return self.cache_dir / f"{sample_id}_traces.json"
 
     def load(self, sample_id: str) -> Optional[Dict[str, Any]]:
-        """Load cached traces for a sample."""
+        """load cached traces for a sample."""
         cache_path = self._get_cache_path(sample_id)
         if cache_path.exists():
             try:
                 with open(cache_path, "r") as f:
                     return json.load(f)
             except Exception as e:
-                print(f"[TraceCache] Error loading cache for {sample_id}: {e}")
+                print(f"[cache] error loading for {sample_id}: {e}")
         return None
 
     def save(
@@ -283,7 +281,7 @@ class TraceCache:
         candidates: List[Dict],
         attempts: int
     ):
-        """Save traces to cache."""
+        """save traces to cache."""
         cache_path = self._get_cache_path(sample_id)
         data = {
             "sample_id": sample_id,
@@ -296,10 +294,10 @@ class TraceCache:
             with open(cache_path, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
-            print(f"[TraceCache] Error saving cache for {sample_id}: {e}")
+            print(f"[cache] error saving for {sample_id}: {e}")
 
     def has_complete_traces(self, sample_id: str, required: int) -> bool:
-        """Check if we have enough verified traces cached."""
+        """check if we have enough verified traces cached."""
         cached = self.load(sample_id)
         if cached and len(cached.get("verified_traces", [])) >= required:
             return True
@@ -307,7 +305,7 @@ class TraceCache:
 
 
 def create_generation_prompt(sample: MedicalQASample) -> str:
-    """Create prompt for generating a reasoning trace."""
+    """create prompt for generating a reasoning trace."""
     prompt = f"""You are a medical expert answering a multiple choice question.
 
 Question:
@@ -330,25 +328,20 @@ def generate_traces(
     cache: Optional[TraceCache] = None
 ) -> VerifiedTraceSet:
     """
-    Generate verified distinct reasoning traces for a sample using rejection sampling.
+    generate verified distinct reasoning traces using rejection sampling.
 
-    Args:
-        sample: The medical QA sample
-        model: Model interface for generation
-        config: Sampler configuration
-        cache: Optional trace cache for persistence
-
-    Returns:
-        VerifiedTraceSet with exactly config.required_traces distinct traces
+    rejection sampling = keep generating until we get traces that:
+    1. have the correct answer
+    2. are sufficiently different from each other
     """
     sample_id = sample.sample_id
-    print(f"\n[Sampler] Generating traces for {sample_id} (answer: {sample.answer})")
+    print(f"\n[sampler] generating traces for {sample_id} (answer: {sample.answer})")
 
-    # Check cache first
+    # check cache first
     if cache:
         cached_data = cache.load(sample_id)
         if cached_data and len(cached_data.get("verified_traces", [])) >= config.required_traces:
-            print(f"[Sampler] Using {len(cached_data['verified_traces'])} cached traces")
+            print(f"[sampler] using {len(cached_data['verified_traces'])} cached traces")
             traces = [
                 ReasoningTrace(
                     trace_id=t["trace_id"],
@@ -369,7 +362,7 @@ def generate_traces(
                 cached=True
             )
 
-    # Initialize from partial cache if available
+    # initialize from partial cache if available
     verified_traces: List[ReasoningTrace] = []
     verified_texts: List[str] = []
     all_candidates: List[Dict] = []
@@ -377,7 +370,7 @@ def generate_traces(
     if cache:
         cached_data = cache.load(sample_id)
         if cached_data:
-            # Restore verified traces
+            # restore verified traces
             for t in cached_data.get("verified_traces", []):
                 trace = ReasoningTrace(
                     trace_id=t["trace_id"],
@@ -390,9 +383,9 @@ def generate_traces(
                 verified_traces.append(trace)
                 verified_texts.append(t["text"])
             all_candidates = cached_data.get("candidates", [])
-            print(f"[Sampler] Resuming from cache: {len(verified_traces)} verified, {len(all_candidates)} candidates")
+            print(f"[sampler] resuming from cache: {len(verified_traces)} verified, {len(all_candidates)} candidates")
 
-    # Create generation prompt
+    # create generation prompt
     prompt = create_generation_prompt(sample)
     valid_options = set(sample.options.keys()) if sample.options else {"A", "B", "C", "D", "E"}
 
@@ -400,32 +393,32 @@ def generate_traces(
 
     while len(verified_traces) < config.required_traces:
         if attempts >= config.total_max_attempts:
-            print(f"[Sampler] WARNING: Reached max attempts ({config.total_max_attempts})")
+            print(f"[sampler] warning: reached max attempts ({config.total_max_attempts})")
             break
 
         attempts += 1
-        print(f"[Sampler] Attempt {attempts}/{config.total_max_attempts}, have {len(verified_traces)}/{config.required_traces} traces")
+        print(f"[sampler] attempt {attempts}/{config.total_max_attempts}, have {len(verified_traces)}/{config.required_traces} traces")
 
-        # Generate candidate trace
+        # generate candidate trace
         try:
             result: GenerationResult = model.generate(prompt)
             generated_text = result.text.strip()
         except Exception as e:
-            print(f"[Sampler] Generation error: {e}")
+            print(f"[sampler] generation error: {e}")
             generated_text = ""
 
-        # Optional sleep for API rate limiting
+        # optional sleep for api rate limiting
         if config.post_generation_sleep_seconds > 0:
             time.sleep(config.post_generation_sleep_seconds)
 
         if not generated_text:
-            print(f"[Sampler] Empty generation, skipping")
+            print(f"[sampler] empty generation, skipping")
             continue
 
-        # Extract answer from trace
+        # extract answer from trace
         extracted_answer = extract_answer(generated_text, valid_options)
 
-        # Record candidate
+        # record candidate
         candidate = {
             "text": generated_text,
             "extracted_answer": extracted_answer,
@@ -433,26 +426,26 @@ def generate_traces(
         }
         all_candidates.append(candidate)
 
-        # Check if answer matches ground truth (rejection sampling criterion)
+        # check if answer matches ground truth (rejection sampling criterion)
         is_correct = extracted_answer == sample.answer
 
         if not is_correct:
             if extracted_answer is None:
-                print(f"[Sampler] Could not extract answer from trace")
+                print(f"[sampler] could not extract answer from trace")
             else:
-                print(f"[Sampler] Wrong answer: {extracted_answer} != {sample.answer}")
+                print(f"[sampler] wrong answer: {extracted_answer} != {sample.answer}")
             continue
 
-        # Check distinctness from existing verified traces
+        # check distinctness from existing verified traces
         is_distinct, reason = is_sufficiently_distinct(
             generated_text, verified_texts, config
         )
 
         if not is_distinct:
-            print(f"[Sampler] Not distinct: {reason}")
+            print(f"[sampler] not distinct: {reason}")
             continue
 
-        # Accept this trace
+        # accept this trace
         trace_id = f"{sample_id}_trace_{len(verified_traces)}"
         trace = ReasoningTrace(
             trace_id=trace_id,
@@ -465,9 +458,9 @@ def generate_traces(
 
         verified_traces.append(trace)
         verified_texts.append(generated_text)
-        print(f"[Sampler] ACCEPTED trace {len(verified_traces)}/{config.required_traces}")
+        print(f"[sampler] accepted trace {len(verified_traces)}/{config.required_traces}")
 
-        # Save progress to cache
+        # save progress to cache
         if cache:
             cache.save(
                 sample_id,
@@ -476,7 +469,7 @@ def generate_traces(
                 attempts
             )
 
-    # Final save
+    # final save
     if cache:
         cache.save(
             sample_id,
@@ -496,7 +489,7 @@ def generate_traces(
 
 
 def _trace_to_dict(trace: ReasoningTrace) -> Dict:
-    """Convert trace to dictionary for serialization."""
+    """convert trace to dictionary for serialization."""
     return {
         "trace_id": trace.trace_id,
         "text": trace.text,
@@ -512,17 +505,7 @@ def generate_all_traces(
     model: ModelInterface,
     config: Config
 ) -> Dict[str, VerifiedTraceSet]:
-    """
-    Generate verified traces for all samples.
-
-    Args:
-        samples: List of medical QA samples
-        model: Model interface for generation
-        config: Full configuration
-
-    Returns:
-        Dictionary mapping sample_id to VerifiedTraceSet
-    """
+    """generate verified traces for all samples."""
     cache = TraceCache(config.sampler.cache_dir)
     results = {}
 
@@ -536,34 +519,34 @@ def generate_all_traces(
 
         if len(trace_set.traces) >= config.sampler.required_traces:
             results[sample.sample_id] = trace_set
-            print(f"[Sampler] {sample.sample_id}: SUCCESS - {len(trace_set.traces)} traces in {trace_set.generation_attempts} attempts")
+            print(f"[sampler] {sample.sample_id}: success - {len(trace_set.traces)} traces in {trace_set.generation_attempts} attempts")
         else:
-            print(f"[Sampler] {sample.sample_id}: INCOMPLETE - only {len(trace_set.traces)} traces")
+            print(f"[sampler] {sample.sample_id}: incomplete - only {len(trace_set.traces)} traces")
             results[sample.sample_id] = trace_set
 
     return results
 
 
-# For command-line usage
+# command-line usage
 if __name__ == "__main__":
     from config import get_config
     from model_interface import create_model
 
     config = get_config()
 
-    print("Loading samples...")
+    print("loading samples...")
     samples = load_all_samples(config)
-    print(f"Loaded {len(samples)} samples")
+    print(f"loaded {len(samples)} samples")
 
-    print("\nInitializing model...")
+    print("\ninitializing model...")
     model = create_model(config.model)
 
-    print("\nGenerating traces...")
+    print("\ngenerating traces...")
     results = generate_all_traces(samples, model, config)
 
     print("\n" + "="*60)
-    print("SUMMARY")
+    print("summary")
     print("="*60)
     for sample_id, trace_set in results.items():
-        status = "COMPLETE" if len(trace_set.traces) >= config.sampler.required_traces else "INCOMPLETE"
+        status = "complete" if len(trace_set.traces) >= config.sampler.required_traces else "incomplete"
         print(f"{sample_id}: {status} ({len(trace_set.traces)} traces, {trace_set.generation_attempts} attempts)")
